@@ -1,0 +1,46 @@
+# Merge this service into the docker-compose.yml that already runs Ghost.
+# Do not run it as a separate compose project: it wants to sit on the same
+# host, reachable only over loopback.
+#
+#   docker compose up -d --build hearts
+#
+services:
+  hearts:
+    build: ./hearts
+    restart: unless-stopped
+    ports:
+      # 127.0.0.1 is the important part. Without it Docker publishes on
+      # 0.0.0.0 and punches a hole straight through the host firewall,
+      # exposing the service to the internet on port 8091.
+      - "127.0.0.1:8091:8091"
+    volumes:
+      # The only thing that must survive a rebuild.
+      #
+      # IMPORTANT: Docker creates this directory owned by root, and the
+      # container runs unprivileged as uid 10001, so before the first start:
+      #
+      #     mkdir -p hearts-data && sudo chown -R 10001:10001 hearts-data
+      #
+      # Without it the service cannot create its database and will not start.
+      - ./hearts-data:/data
+    environment:
+      HEARTS_DB: /data/hearts.sqlite3
+      # Generate once with:  openssl rand -hex 32
+      # Keep it out of this file - put it in the .env beside docker-compose.yml.
+      HEARTS_ADMIN_TOKEN: ${HEARTS_ADMIN_TOKEN}
+      HEARTS_WRITE_LIMIT: "60"
+      HEARTS_THREADS: "4"
+    # Hard ceilings, so a bug or a traffic spike in here can never starve Ghost
+    # or MySQL on a 2 GB single-core box. Normal use sits around 40 MB; if the
+    # container is ever killed for hitting 160 MB, something is wrong and you
+    # want to know rather than have Ghost swap.
+    mem_limit: 160m
+    memswap_limit: 160m
+    cpus: 0.5
+    read_only: true          # the image is immutable; only /data is writable
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

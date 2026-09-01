@@ -1,0 +1,16 @@
+# Core (required)
+numpy>=1.24
+pillow>=10.0
+rawpy>=0.19          # NEF/RAW decoding - ships prebuilt LibRaw, no separate install
+transformers>=4.40   # CLIP ViT-L/14
+torch>=2.1           # see README: install the CUDA build first if you have an NVIDIA GPU
+
+# Optional but recommended - adds the NIMA technical-quality model.
+# If this fails to install, the script still runs (pass --no-nima).
+pyiqa>=0.1.10
+
+# Video support needs ffmpeg + ffprobe on PATH. Not a pip package:
+#   Windows:  winget install Gyan.FFmpeg     (then reopen your terminal)
+#   macOS:    brew install ffmpeg
+#   Linux:    sudo apt install ffmpeg
+# Without them the script processes stills only and says so.

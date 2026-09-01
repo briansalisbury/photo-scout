@@ -1,0 +1,51 @@
+{
+  "_readme": [
+    "Photo Scout's scoring scale, fitted to THIS library. Written",
+    "automatically - you should not need to edit it by hand.",
+    "",
+    "AESTHETIC_RANGE / NIMA_RANGE: the low and high raw values the two",
+    "  models actually produce on your photographs. The shipped defaults",
+    "  are guesses; on a real library they are usually too wide, which",
+    "  squashes every score into the middle and can yield no TOP PICKs",
+    "  at all. These map the real spread onto 0-100.",
+    "",
+    "VERDICT_BANDS: the composite score at which each verdict starts,",
+    "  set by proportion - roughly the top 5% TOP PICK, next 15% STRONG,",
+    "  next 30% MAYBE, the rest PASS.",
+    "",
+    "_keepers_at_calibration: how many photographs were scored when this",
+    "  was fitted. A later run re-fits once the pool has moved by more",
+    "  than 10%, and leaves it alone otherwise.",
+    "",
+    "Delete this file to go back to the shipped defaults; the next run",
+    "will fit a fresh one. Deleting it changes nothing about your",
+    "photographs or their raw scores - only how those scores are banded."
+  ],
+  "AESTHETIC_RANGE": [
+    3.7984652519226074,
+    5.977017879486084
+  ],
+  "NIMA_RANGE": [
+    3.211061477661133,
+    6.079142093658447
+  ],
+  "VERDICT_BANDS": [
+    [
+      80.08288156394423,
+      "TOP PICK"
+    ],
+    [
+      64.81190434738527,
+      "STRONG"
+    ],
+    [
+      49.01163331740871,
+      "MAYBE"
+    ],
+    [
+      0.0,
+      "PASS"
+    ]
+  ],
+  "_keepers_at_calibration": 2639
+}

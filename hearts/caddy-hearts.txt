@@ -1,0 +1,133 @@
+# Caddy route for the heart service.
+#
+# Written against the Caddyfile that ships with the official Ghost Docker
+# Compose setup, which uses {$DOMAIN} and a `handle` block for Ghost.
+#
+# Two separate changes are needed. The second one will not work without the
+# first.
+
+
+# ===========================================================================
+# 1. Put the hearts container on the same network as Caddy
+# ===========================================================================
+#
+# `wget: bad address 'hearts:8091'` from inside the Caddy container means
+# Docker's DNS cannot see the service - they are on different networks. The
+# hearts block did not declare a `networks:` key, so Compose put it on the
+# default network while Caddy sits on one the Ghost stack declares explicitly.
+#
+# Find what Caddy is on:
+#
+#     docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' <caddy-container>
+#
+# Then give the hearts service the SAME `networks:` list that the caddy
+# service has in docker-compose.yml. If Caddy's block says:
+#
+#     caddy:
+#       networks:
+#         - ghost
+#
+# then hearts needs exactly that too:
+
+  hearts:
+    build: ./hearts
+    restart: unless-stopped
+    networks:
+      - ghost              # <-- match whatever the caddy service declares
+    # ... the rest of the block unchanged ...
+
+# Apply and re-test:
+#
+#     docker compose up -d hearts
+#     docker compose exec caddy wget -qO- http://hearts:8091/api/hearts/_health
+#
+# Do not go further until that prints {"ok":true,...}.
+
+
+# ===========================================================================
+# 2. Add the route to the Caddyfile
+# ===========================================================================
+#
+# Edit the Caddyfile on the HOST - the one bind-mounted into the container,
+# not the copy inside it. Add the heart block to the {$DOMAIN} site block
+# ONLY. Leave {$ADMIN_DOMAIN} alone: the gallery is on the public site.
+#
+# Insert it immediately BEFORE the "Default proxy everything else to Ghost"
+# comment, so it is matched before the catch-all:
+
+{$DOMAIN} {
+        import snippets/Logging
+        # Traffic Analytics service
+        import snippets/TrafficAnalytics
+        # ActivityPub Service
+        import snippets/ActivityPub
+
+        # >>> ADD THESE FIVE LINES <<<
+        # Heart service for the photo gallery
+        handle /api/hearts* {
+                reverse_proxy hearts:8091
+        }
+        # >>> END <<<
+
+        # Default proxy everything else to Ghost
+        handle {
+                reverse_proxy ghost:2368
+        }
+        # Optional: Enable gzip compression
+        encode gzip
+        # Optional: Add security headers
+        import snippets/SecurityHeaders
+}
+
+# The upstream is `hearts:8091`, NOT `127.0.0.1:8091`. Inside Caddy's
+# container, localhost is Caddy.
+#
+# That Caddyfile already uses `handle` for the Ghost catch-all, which is exactly
+# what makes this safe: handle blocks are mutually exclusive, and Caddy
+# evaluates the more specific path first. Nothing else on the site changes.
+#
+# Apply it - reload is graceful, so nothing drops and Ghost is not restarted:
+#
+#     docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+#     docker compose exec caddy caddy reload  --config /etc/caddy/Caddyfile
+#     curl -s https://example.com/api/hearts
+#
+# Expect: {"counts":{},"mine":[],"total":0}
+#
+# And confirm the private endpoint is private:
+#
+#     curl -s -o /dev/null -w '%{http_code}\n' https://example.com/api/hearts/top
+#
+# Expect: 401
+
+
+# ===========================================================================
+# Notes
+# ===========================================================================
+#
+# CACHING: the service sends `Cache-Control: no-store` and Caddy passes it
+# through, so nothing extra is needed. If a CDN such as Cloudflare sits in
+# front of the site and counts look frozen, add a cache rule to bypass
+# /api/hearts*.
+#
+# GZIP: `encode gzip` applies to the heart responses too. They are tiny JSON;
+# this is harmless.
+#
+# RATE LIMITING: standard Caddy has no rate limiter - the module needs a
+# custom build — so the per-IP layer from SPEC_hearts.md §6.3 is NOT in place.
+# What still applies:
+#
+#   * the per-voter cap inside the service, 60 writes an hour, which is the
+#     limit that actually catches a script since it survives a change of IP
+#   * hearting is a toggle, so holding the button down changes nothing
+#
+# For a per-IP layer, a Cloudflare rate limiting rule on /api/hearts* is far
+# less trouble than rebuilding Caddy with a plugin.
+#
+# LOCKING IT DOWN FURTHER: once Caddy reaches the service over the Docker
+# network, the `ports:` line in the compose file is no longer needed at all.
+# Removing it means nothing is published to the host and the service is
+# unreachable except through Caddy. The trade is that `curl localhost:8091`
+# stops working; use this instead:
+#
+#     docker compose exec caddy wget -qO- http://hearts:8091/api/hearts/_health
