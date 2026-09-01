@@ -146,12 +146,17 @@ LIB.mkdir(parents=True)
 rng = np.random.default_rng(9)
 # One folder carries its date in the name (which must be stripped from the
 # display) and one is a bare year (which must be left alone).
+LONG_FOLDER = "Grand Staircase Escalante National Monument, Hole in the Rock Road"
 FOLDER_DATES = {"2011-06-28 - Wyoming": "2011:06:28",
-                "2010 Arches":          "2010:03:12"}
+                "2010 Arches":          "2010:03:12",
+                # Wider than any card. It used to share a line with the date and
+                # resolution and push both out of sight behind the ellipsis.
+                f"2019-05-04 - {LONG_FOLDER}": "2019:05:04"}
 # Different clock time per frame, running opposite to the file names, so a sort
 # that stopped at the day could not accidentally come out right.
 TIMES = [f"{6 + (19 - i) // 2:02d}:{((19 - i) % 2) * 30:02d}:00" for i in range(20)]
-FOLDER_SHOWN = {"2011-06-28 - Wyoming": "Wyoming", "2010 Arches": "2010 Arches"}
+FOLDER_SHOWN = {"2011-06-28 - Wyoming": "Wyoming", "2010 Arches": "2010 Arches",
+                f"2019-05-04 - {LONG_FOLDER}": LONG_FOLDER}
 for folder, shot in FOLDER_DATES.items():
     d = LIB / folder; d.mkdir(parents=True)
     for i in range(20):
@@ -322,7 +327,8 @@ print("\n=== capture dates reach the payload ===")
 check("every entry carries a date field", all("d" in e for e in data))
 iso = {e["d"] for e in data if e["d"]}
 check("dates are the ISO form of the EXIF written",
-      {v[:10] for v in iso} <= {"2011-06-28", "2010-03-12"} and iso,
+      {v[:10] for v in iso} <= {d.replace(":", "-") for d in FOLDER_DATES.values()}
+      and bool(iso),
       str(sorted(iso)[:2]))
 check("the clock time travels with the date",
       all(len(v) == 19 for v in iso), str(sorted(iso)[:2]))
@@ -551,45 +557,90 @@ with sync_playwright() as pw:
     total = shown()
     check("cards rendered", total == len(short), f"{total} of {len(short)}")
 
-    print("\n--- folder and date on the card")
+    print("\n--- folder on its own line")
     texts = P.eval_on_selector_all(".psc-meta", "e => e.map(x => x.textContent)")
-    check("a meta line is rendered on every card", len(texts) == total,
+    check("a folder line is rendered on every card", len(texts) == total,
           f"{len(texts)} of {total}")
     check("it shows the folder", any("Wyoming" in t for t in texts))
     check("a date in the folder name is stripped from the display",
           not any("2011-06-28 -" in t for t in texts), str(texts[:3]))
     check("a bare year in a folder name is left alone",
           any("2010 Arches" in t for t in texts), str(texts[:3]))
-    check("it shows the long-form date",
-          any("June 28, 2011" in t for t in texts) and
-          any("March 12, 2010" in t for t in texts), str(texts[:2]))
-    check("and the time of day beside it, 24 hour",
-          # The resolution follows the time on the same line, so the clock is
-          # no longer necessarily the end of the string.
-          all(re.search(r"\d{2}:\d{2}(?:$| ·)", t) for t in texts if "," in t),
-          str([t for t in texts if "," in t][:3]))
-    check("folder and date are separated, not run together",
-          all(("·" in t) for t in texts if "," in t and " - " not in t))
-    check("undated photographs show no date, and no stray separator",
-          any("," not in t and t.split(" · ")[0] in FOLDER_SHOWN.values()
-              for t in texts), str(texts[:3]))
-    check("no empty segment anywhere on a meta line",
-          not any("· ·" in t or t.strip().startswith("·") or t.strip().endswith("·")
-                  for t in texts), str([t for t in texts if "· ·" in t][:2]))
+    check("the folder line carries the folder and nothing else",
+          all(t in FOLDER_SHOWN.values() for t in texts), str(texts[:3]))
+    check("the full name is on the title attribute, for when it is elided",
+          P.eval_on_selector(".psc-meta", "e => e.title") == P.eval_on_selector(
+              ".psc-meta", "e => e.textContent"))
 
-    print("\n--- resolution on the card, because the score ignores it")
+    print("\n--- date, time and resolution on the line below")
+    # They used to share the folder's line, where a long folder name pushed
+    # them past the ellipsis and out of sight. This is the regression guard.
+    specs = P.eval_on_selector_all(".psc-specs", "e => e.map(x => x.textContent)")
+    check("a specs line is rendered on every card", len(specs) == total,
+          f"{len(specs)} of {total}")
+    check("it shows the long-form date",
+          any("June 28, 2011" in t for t in specs) and
+          any("March 12, 2010" in t for t in specs), str(specs[:2]))
+    check("and the time of day beside it, 24 hour",
+          all(re.search(r"\d{2}:\d{2}", t) for t in specs if "," in t),
+          str([t for t in specs if "," in t][:3]))
     check("every card states its pixel dimensions",
-          all(re.search(r"\d+ × \d+ · \d+\.\d MP$", t) for t in texts),
-          str([t for t in texts if " MP" not in t][:3]))
+          all(re.search(r"\d+ × \d+ · \d+\.\d MP$", t) for t in specs),
+          str([t for t in specs if " MP" not in t][:3]))
     check("the figures match the fixture",
-          all(re.search(r"\b1000 × 700 · 0\.7 MP$", t) for t in texts),
-          str(texts[:2]))
-    check("and they reach the payload as one pre-rendered string",
+          all(re.search(r"\b1000 × 700 · 0\.7 MP$", t) for t in specs),
+          str(specs[:2]))
+    check("undated photographs show the resolution alone, with no stray separator",
+          any(re.fullmatch(r"\d+ × \d+ · \d+\.\d MP", t) for t in specs),
+          str(specs[:3]))
+    check("no empty segment anywhere on either line",
+          not any("· ·" in t or t.strip().startswith("·") or t.strip().endswith("·")
+                  for t in texts + specs),
+          str([t for t in texts + specs if "· ·" in t][:2]))
+
+    print("\n--- and nothing on either line is clipped")
+    # scrollWidth > clientWidth is exactly the condition that hides text behind
+    # an ellipsis. The folder line is allowed to clip; the specs line is not.
+    clipped = P.eval_on_selector_all(
+        ".psc-specs", "e => e.filter(x => x.scrollWidth > x.clientWidth + 1)"
+                      ".map(x => x.textContent)")
+    check("the specs line always fits, wrapping rather than truncating",
+          not clipped, str(clipped[:2]))
+    check("no fact is broken across a line, each being its own nowrap span",
+          all(P.eval_on_selector_all(
+              ".psc-specs span",
+              "e => e.every(x => getComputedStyle(x).whiteSpace === 'nowrap')")
+              for _ in (0,)))
+    check("the facts are split into spans, not run together as one string",
+          P.eval_on_selector(".psc-specs", "e => e.querySelectorAll('span').length") == 4,
+          str(P.eval_on_selector(".psc-specs", "e => e.textContent")))
+
+    check("resolution reaches the payload as one pre-rendered string",
           all(re.match(r"^\d+ × \d+ · \d+\.\d MP$", e["r"]) for e in data),
           str([e.get("r") for e in data][:2]))
     check("resolution is searchable",
           P.eval_on_selector(".psc-card", "e => e.dataset.search").count("mp") == 1,
           P.eval_on_selector(".psc-card", "e => e.dataset.search"))
+
+    print("\n--- a very long folder name hides nothing else")
+    # The regression this layout exists for, at three window widths. The folder
+    # may clip; the date, time and resolution beneath it may not.
+    for width in (1400, 1000, 700):
+        P.set_viewport_size({"width": width, "height": 900})
+        P.wait_for_timeout(150)
+        sel = f'.psc-card[data-folder="{LONG_FOLDER}"]'
+        txt = P.eval_on_selector(sel + " .psc-specs", "e => e.textContent")
+        check(f"at {width}px the date survives beside the long folder",
+              "May 4, 2019" in txt, txt)
+        check(f"at {width}px so does the resolution",
+              re.search(r"\d+ × \d+ · \d+\.\d MP", txt) is not None, txt)
+        check(f"at {width}px the specs line wraps instead of truncating",
+              not P.eval_on_selector(sel + " .psc-specs",
+                                     "e => e.scrollWidth > e.clientWidth + 1"))
+    check("the folder itself is the one thing allowed to clip, and says so on hover",
+          P.eval_on_selector(f'.psc-card[data-folder="{LONG_FOLDER}"] .psc-meta',
+                             "e => e.title") == LONG_FOLDER)
+    P.set_viewport_size({"width": 1400, "height": 900}); P.wait_for_timeout(150)
 
     print("\n--- sorting")
     P.select_option(".psc-sort", "name-asc"); P.wait_for_timeout(250)
@@ -782,9 +833,17 @@ with sync_playwright() as pw:
         return P.eval_on_selector(".psc-cap", "e => e.textContent").split("  ·  ")[0]
 
     check("opens on the card that was clicked", lb_name() == first, first)
-    check("the full-screen caption carries the resolution too",
-          " MP" in P.eval_on_selector(".psc-cap", "e => e.textContent"),
-          P.eval_on_selector(".psc-cap", "e => e.textContent"))
+    # In its own pill under the caption, not appended to it: a long file name
+    # would run into the caption's ellipsis and take the resolution with it.
+    check("the full-screen view states the resolution",
+          re.fullmatch(r"\d+ × \d+ · \d+\.\d MP",
+                       P.eval_on_selector(".psc-dims-lb", "e => e.textContent")) is not None,
+          P.eval_on_selector(".psc-dims-lb", "e => e.textContent"))
+    check("and the caption stays the file name alone",
+          P.eval_on_selector(".psc-cap", "e => e.textContent") == first, first)
+    check("neither is clipped",
+          not P.eval_on_selector(".psc-dims-lb",
+                                 "e => e.scrollWidth > e.clientWidth + 1"))
     check("counter counts every visible card",
           P.eval_on_selector(".psc-count-lb", "e => e.textContent")
           == f"1 / {shown()}")

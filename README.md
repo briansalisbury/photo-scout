@@ -463,9 +463,11 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
   its thumbnail, verdict badge, score and one-sentence feedback. Click a thumbnail
   to open it full-window in the lightbox. Filter buttons for TOP PICK / STRONG /
   MAYBE / PASS, a checkbox to reveal near-duplicates, and a search box for folder
-  or filename. Under each thumbnail: the folder, the capture date and time, and the
-  file's pixel dimensions — the last because resolution is deliberately excluded
-  from the score, so the judgement is yours. All client-side — just double-click it.
+  or filename. Under each thumbnail the folder takes one line and the capture date,
+  time and pixel dimensions the next — dimensions because resolution is deliberately
+  excluded from the score, so the judgement is yours, and on a separate line because
+  a long folder name would otherwise crowd them off. Only the folder is ever
+  shortened, with the full name on hover. All client-side — just double-click it.
 - **`shortlist.csv`** — only the TOP PICK and STRONG keepers. This is the file to
   actually work from.
 - **`report.csv`** — everything, all columns, for Excel or Lightroom import.

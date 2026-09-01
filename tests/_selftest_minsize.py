@@ -17,7 +17,7 @@ by construction. So the test below does not merely assert the invariant - it
 first demonstrates the failure mode that would exist without the normalisation,
 then shows the pipeline is immune to it.
 """
-import contextlib, csv, io, shutil, sqlite3, sys
+import contextlib, csv, io, re, shutil, sqlite3, sys
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -312,7 +312,13 @@ check("and says nothing when the dimensions are unknown",
       ps.pretty_resolution(None, None) == "" and ps.pretty_resolution(0, 0) == "")
 
 htmlr = (ROUT / "report.html").read_text(encoding="utf-8")
-check("the card meta line carries the resolution", "3000 × 2000 · 6.0 MP" in htmlr)
+# Targeted at the rendered spans, not just the data-res attribute - the
+# attribute alone would make a looser substring check pass for the wrong reason.
+check("the card carries the resolution as its own facts",
+      "<span>3000 × 2000</span> &middot; <span>6.0 MP</span>" in htmlr,
+      str(re.findall(r"<span>\d+ × \d+</span>.{0,40}", htmlr)[:2]))
+check("on a line of its own, below the folder",
+      re.search(r'class="specs">(<span>[^<]*</span>( &middot; )?)+</div>', htmlr) is not None)
 check("the lightbox is given it too", 'data-res="3000 × 2000 · 6.0 MP"' in htmlr)
 check("and it is searchable", "3000 × 2000 · 6.0 mp" in htmlr)
 

@@ -494,6 +494,21 @@ def pretty_resolution(w: Optional[int], h: Optional[int]) -> str:
     return f"{w} × {h} · {(w * h) / 1e6:.1f} MP"
 
 
+def spec_atoms(stamp: Optional[str], w: Optional[int], h: Optional[int]) -> list[str]:
+    """
+    The facts shown under a photograph, as pieces that must never be broken
+    across a line: ['June 28, 2011', '07:00', '6000 × 4000', '24.0 MP'].
+
+    Returned separately rather than as one string so the report can wrap between
+    them and not inside them. A date split over two lines reads as a typo.
+    """
+    out = [b for b in (pretty_date(stamp), pretty_time(stamp)) if b]
+    if w and h:
+        out.append(f"{w} × {h}")
+        out.append(f"{(w * h) / 1e6:.1f} MP")
+    return out
+
+
 # A date at the start or the end of a folder name: a four-digit year followed by
 # a month, optionally a day, in any of the usual separator styles -
 # "2011-07-05", "2011 6 28", "2011.07.05", "20110705".
@@ -2267,7 +2282,25 @@ HTML_TEMPLATE = r"""<!doctype html>
  .PASS     { background:#3a3a3a; color:#a5a5a5; }
  .VIDEO    { background:#4a2a5c; color:#dcb0f5; margin-right:5px; }
  .note { color:#b6b6b6; font-size:12.5px; margin:6px 0 8px; }
- .folder { color:#7d7d7d; font-size:11.5px; margin-bottom:6px; word-break:break-all; }
+ /* Two muted lines under the file name, split by how long each can get.
+    .folder holds one free-text field of unbounded length, so it takes the whole
+    line and truncates with an ellipsis; the full name is in its title
+    attribute. .specs holds facts of predictable width - date, time, pixel
+    dimensions, megapixels - and is allowed to WRAP rather than clip, so none of
+    them can ever be cut off.
+    Before this they shared a line, and a long folder name pushed the date and
+    resolution out of sight entirely. */
+ .folder { color:#7d7d7d; font-size:11.5px; margin-bottom:2px;
+   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+ /* tabular-nums lines the figures up down a column of cards, which is most of
+    what makes a grid of numbers look tidy. */
+ .specs { color:#6a6a6a; font-size:11px; margin-bottom:6px; line-height:1.45;
+   font-variant-numeric:tabular-nums; }
+ /* Each fact is atomic: a line break may fall between the date and the time,
+    or between the pixel dimensions and the megapixel figure, but never through
+    the middle of any one of them. A date split over two lines reads as a typo. */
+ .specs span { white-space:nowrap; }
+ .card .folder:empty, .card .specs:empty { display:none; }
  .links a { color:#7fc4ff; text-decoration:none; font-size:12px; margin-right:12px; }
  .links a:hover { text-decoration:underline; }
 
@@ -2335,6 +2368,11 @@ HTML_TEMPLATE = r"""<!doctype html>
    text-overflow:ellipsis; }
  #lb-sub { color:#9a9a9a; font-size:12px; white-space:nowrap; overflow:hidden;
    text-overflow:ellipsis; }
+ /* Outside .grow and flex:none, so a long folder name in #lb-sub can never
+    squeeze the resolution out of the bar. This is the view where you decide
+    whether a frame is big enough to use, so it has to survive. */
+ #lb-dims { flex:none; color:#8a8a8a; font-size:12px; white-space:nowrap;
+   font-variant-numeric:tabular-nums; }
  #lb-bar button, #lb-bar a { background:#242424; color:#e8e8e8; border:1px solid #3a3a3a;
    border-radius:6px; padding:6px 11px; font-size:13px; cursor:pointer;
    text-decoration:none; white-space:nowrap; }
@@ -2402,6 +2440,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       <div id="lb-name"></div>
       <div id="lb-sub"></div>
     </span>
+    <span id="lb-dims"></span>
     <button id="lb-zoom" title="Toggle 1:1 (Z)">1:1</button>
     <button id="lb-full" title="Full screen (F)">Full screen</button>
     <a id="lb-folder" href="#">open folder</a>
@@ -2882,13 +2921,12 @@ __CARDS__
    lb.classList.toggle('no-image', !prev);
    lbImg.src = prev || '';
    document.getElementById('lb-name').textContent = c.dataset.name;
-   // Resolution belongs here above all: this is the view where you decide
-   // whether a frame is big enough to use, and the score deliberately says
-   // nothing about pixel count.
    document.getElementById('lb-sub').textContent =
-     [c.dataset.folder,
-      c.dataset.verdicttext + '  ' + c.dataset.score,
-      c.dataset.res].filter(Boolean).join('  ·  ');
+     [c.dataset.folder, c.dataset.verdicttext + '  ' + c.dataset.score]
+       .filter(Boolean).join('  ·  ');
+   // Resolution sits in its own slot rather than at the end of the subtitle,
+   // where a long folder name would push it past the ellipsis.
+   document.getElementById('lb-dims').textContent = c.dataset.res || '';
    document.getElementById('lb-note').textContent = c.dataset.note;
    document.getElementById('lb-count').textContent = (idx + 1) + '/' + list.length;
    document.getElementById('lb-folder').href = c.dataset.folderurl;
@@ -2981,13 +3019,21 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
         # Pixel dimensions, when the row has them. A database scored before the
         # columns existed simply shows nothing here rather than failing.
         try:
-            res_txt = pretty_resolution(r["width"], r["height"])
+            wpx, hpx = r["width"], r["height"]
         except (IndexError, KeyError):
-            res_txt = ""
-        # One line of facts about the file, joined only where both sides exist,
-        # so a missing date never leaves a stranded separator.
-        meta_line = " &middot; ".join(
-            html.escape(b) for b in (folder_shown, shot_on, res_txt) if b)
+            wpx = hpx = None
+        res_txt = pretty_resolution(wpx, hpx)
+        # The folder gets a line to itself because it is the one field of
+        # unbounded length; the title attribute carries the full name for when
+        # the ellipsis hides some of it.
+        folder_html = (f'<div class="folder" title="{html.escape(folder_shown, quote=True)}">'
+                       f'{html.escape(folder_shown)}</div>') if folder_shown else ""
+        # Date, time and resolution below it, each wrapped so a line break can
+        # fall between facts but never inside one.
+        atoms = spec_atoms(iso, wpx, hpx)
+        specs_html = ('<div class="specs">'
+                      + " &middot; ".join(f"<span>{html.escape(a)}</span>" for a in atoms)
+                      + "</div>") if atoms else ""
         # Everything searchable in one blob: filename, folder (as shown AND as
         # named on disk), every date form, the verdict and the written feedback,
         # so "august 2026", "wyoming", "2011-07-05", "top pick" and "moody
@@ -3038,7 +3084,7 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
       <span class="score">{(r['composite'] or 0):.0f}</span>
     </div>
     <div class="name">{html.escape(r['filename'])}{' &middot; near-dup' if is_dup else ''}</div>
-    <div class="folder">{meta_line}</div>
+    {folder_html}{specs_html}
     <div class="note">{html.escape(r['note'] or '')}</div>
     <div class="links">{links}</div>
     <div class="tagwrap"><div class="taglist">

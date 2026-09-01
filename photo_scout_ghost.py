@@ -605,8 +605,20 @@ GALLERY_CSS = """
 .psc-TOPPICK{background:#1e5f3f;color:#8ff0bd}
 .psc-STRONG{background:#1f4a63;color:#9fd8f5}
 .psc-name{font-weight:600;font-size:12.5px;word-break:break-all;margin-top:4px}
+/* Two muted lines, split by how long each can get. .psc-meta holds the folder:
+   one free-text field of unbounded length, so it takes the whole line and
+   truncates, with the full name on its title attribute. .psc-specs holds facts
+   of predictable width - date, time, dimensions, megapixels - and WRAPS instead
+   of clipping, so none of them can be cut off. They shared a line until a long
+   folder name was found pushing the date and resolution out of sight. */
 .psc-meta{color:var(--psc-mut);font-size:11.5px;margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.psc-specs{color:#6f6f6f;font-size:11px;margin-top:2px;line-height:1.45;
+  font-variant-numeric:tabular-nums}
+/* Each fact is atomic: a break may fall between the date and the time, or
+   between the dimensions and the megapixel figure, but never through the middle
+   of any one of them. A date split over two lines reads as a typo. */
+.psc-specs span{white-space:nowrap}
 .psc-note{color:#b6b6b6;font-size:12px;margin-top:5px}
 .psc-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;align-items:center}
 .psc-tag{font-size:11px;padding:3px 7px;border-radius:99px;display:inline-flex;
@@ -688,6 +700,13 @@ GALLERY_CSS = """
 .psc-cap{position:absolute;top:16px;left:20px;color:#ccc;font-size:12.5px;
   background:rgba(0,0,0,.45);padding:4px 12px;border-radius:99px;z-index:2;
   max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Its own pill under the caption rather than appended to it: a long file name
+   would otherwise run into the ellipsis and take the resolution with it, and
+   this is the view where knowing the pixel dimensions actually matters. */
+.psc-dims-lb{position:absolute;top:45px;left:20px;color:#9a9a9a;font-size:11.5px;
+  background:rgba(0,0,0,.45);padding:3px 12px;border-radius:99px;z-index:2;
+  white-space:nowrap;font-variant-numeric:tabular-nums}
+.psc-dims-lb:empty{display:none}
 @media (max-width:600px){.psc-nav{width:44px;height:64px;font-size:22px}
   .psc-prev{left:6px} .psc-next{right:6px} .psc-cap{max-width:50vw}}
 </style>
@@ -773,17 +792,28 @@ GALLERY_JS = r"""
 
     var nm = document.createElement('div'); nm.className='psc-name';
     nm.textContent = p.n || ''; b.appendChild(nm);
-    var metaBits = [];
-    if (p.f) metaBits.push(p.f);
-    if (pd) metaBits.push(pd);
-    // Resolution last, and only when it is known: a page built from an older
-    // database simply shows folder and date, as it always did.
-    if (p.r) metaBits.push(p.r);
-    if (metaBits.length){
+    // The folder alone on its line. It is the only unbounded field, so it is
+    // the only one allowed to truncate; the title shows it in full on hover.
+    if (p.f){
       var mt = document.createElement('div'); mt.className='psc-meta';
-      mt.textContent = metaBits.join(' \u00b7 ');
-      mt.title = metaBits.join(' \u00b7 ');   // the full text when it is elided
+      mt.textContent = p.f;
+      mt.title = p.f;
       b.appendChild(mt);
+    }
+    // Date, time, dimensions and megapixels below it. Split back apart and each
+    // wrapped in its own span so the line can wrap BETWEEN facts and never
+    // through the middle of one. Both prettyDate and the resolution string are
+    // built with the same ' \u00b7 ' separator, so one split recovers all four.
+    var specs = [pd, p.r || ''].filter(Boolean).join(' \u00b7 ').split(' \u00b7 ');
+    if (specs[0]){
+      var sp = document.createElement('div'); sp.className = 'psc-specs';
+      specs.forEach(function(fact, k){
+        if (k) sp.appendChild(document.createTextNode(' \u00b7 '));
+        var s = document.createElement('span');
+        s.textContent = fact;
+        sp.appendChild(s);
+      });
+      b.appendChild(sp);
     }
     if (p.note){var nt=document.createElement('div');nt.className='psc-note';
       nt.textContent=p.note;b.appendChild(nt);}
@@ -1312,7 +1342,8 @@ GALLERY_JS = r"""
   var navPrev = lb.querySelector('.psc-prev'),
       navNext = lb.querySelector('.psc-next'),
       lbCount = lb.querySelector('.psc-count-lb'),
-      lbCap   = lb.querySelector('.psc-cap');
+      lbCap   = lb.querySelector('.psc-cap'),
+      lbDims  = lb.querySelector('.psc-dims-lb');
 
   // The arrows walk whatever is VISIBLE, so they follow the All / Top picks /
   // Strong buttons and the search box with no extra bookkeeping. The list is
@@ -1331,9 +1362,10 @@ GALLERY_JS = r"""
     var p = DATA[order[cur]];
     lbImg.src = p.pv || p.th || '';
     lbImg.alt = p.n || '';
-    // The full-screen view is where resolution actually matters, so the caption
-    // carries it alongside the file name.
-    lbCap.textContent = [p.n || '', p.r || ''].filter(Boolean).join('  ·  ');
+    lbCap.textContent = p.n || '';
+    // Kept out of the caption: a long file name would push it past the
+    // ellipsis, and this is the view where resolution actually matters.
+    lbDims.textContent = p.r || '';
     lbCount.textContent = (cur + 1) + ' / ' + order.length;
     var many = order.length > 1;
     navPrev.style.display = many ? 'flex' : 'none';
@@ -1503,7 +1535,8 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         '<button class="x" type="button" aria-label="Close">&times;</button>'
         '<button class="psc-nav psc-prev" type="button" aria-label="Previous">&#8249;</button>'
         '<button class="psc-nav psc-next" type="button" aria-label="Next">&#8250;</button>'
-        '<span class="psc-cap"></span><span class="psc-count-lb"></span>'
+        '<span class="psc-cap"></span><span class="psc-dims-lb"></span>'
+        '<span class="psc-count-lb"></span>'
         '<img alt=""></div>'
         f'<script type="application/json" class="psc-data">{data_json}</script>'
         + GALLERY_JS +

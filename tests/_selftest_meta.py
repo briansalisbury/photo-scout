@@ -125,7 +125,12 @@ DATES = {
     "2011-06-28 - Wyoming": "2011:06:28",
     "2010-03-12 - Arches":  "2010:03:12",
     "2016-03-09 - Mustang": "2016:03:09",
+    # A folder name far wider than any card. It used to share a line with the
+    # date and resolution and push both out of sight behind the ellipsis.
+    "2019-05-04 - Grand Staircase Escalante National Monument, Hole in the Rock Road":
+        "2019:05:04",
 }
+LONG_FOLDER = "Grand Staircase Escalante National Monument, Hole in the Rock Road"
 TIMES = [f"{6 + (11 - i) // 2:02d}:{((11 - i) % 2) * 30:02d}:00" for i in range(12)]
 for folder, day in DATES.items():
     d = LIB / folder; d.mkdir(parents=True)
@@ -153,7 +158,8 @@ dated = [r for r in rows if r["taken_at"]]
 check("taken_at column exists and is populated", len(dated) >= 30,
       f"{len(dated)} of {len(rows)}")
 check("dates match the EXIF written",
-      {r["taken_at"][:10] for r in dated} == {"2011-06-28", "2010-03-12", "2016-03-09"},
+      {r["taken_at"][:10] for r in dated} ==
+      {d.replace(":", "-") for d in DATES.values()},
       str(sorted({r["taken_at"][:10] for r in dated})))
 check("the clock time is stored too, not just the day",
       all(len(r["taken_at"]) == 19 for r in dated),
@@ -167,12 +173,23 @@ check("the undated file is stored as NULL, not guessed",
 h = (OUT / "report.html").read_text(encoding="utf-8")
 print("\n=== the card ===")
 check("folder appears on the card, with its date stripped",
-      ">Wyoming &middot; June 28, 2011 " in h)
+      re.search(r'<div class="folder"[^>]*>Wyoming</div>', h) is not None,
+      str(re.findall(r'<div class="folder".{0,60}', h)[:2]))
+check("the date is on the line below the folder, not beside it",
+      # A long folder name used to push the date off the end of a shared line.
+      # Splitting them is what guarantees the date is always visible.
+      re.search(r'<div class="specs"><span>June 28, 2011</span>', h) is not None,
+      str(re.findall(r'<div class="specs">.{0,70}', h)[:2]))
 check("the time of day is shown beside the date, 24 hour",
-      # The meta line runs "folder - date - time - resolution", so the time may
-      # be followed by another separator rather than the end of the element.
-      re.search(r"June 28, 2011 \u00b7 (0[6-9]|1[0-2]):[0-5]\d(?:<| &middot;)", h) is not None,
-      str(re.findall(r"June 28, 2011[^<]*", h)[:3]))
+      re.search(r"<span>June 28, 2011</span> &middot; "
+                r"<span>(0[6-9]|1[0-2]):[0-5]\d</span>", h) is not None,
+      str(re.findall(r"June 28, 2011</span>.{0,40}", h)[:3]))
+check("each fact is wrapped so a line break cannot fall inside one",
+      "<span>June 28, 2011</span>" in h and
+      re.search(r"<span>\d+ \u00d7 \d+</span>", h) is not None,
+      str(re.findall(r"<span>[^<]*</span>", h)[:5]))
+check("the full folder name is available on hover when it is elided",
+      'class="folder" title="Wyoming"' in h)
 check("search blob carries the time", re.search(r'data-search="[^"]*\d\d:\d\d', h) is not None)
 check("the raw dated folder name is not displayed",
       ">2011-06-28 - Wyoming" not in h)
@@ -193,6 +210,26 @@ with sync_playwright() as pw:
     b = pw.chromium.launch(); P = b.new_page()
     P.set_viewport_size({"width": 1500, "height": 950})
     P.goto((OUT / "report.html").resolve().as_uri()); P.wait_for_timeout(500)
+
+    print("\n--- a very long folder name hides nothing else")
+    # The regression this layout exists for. The folder is allowed to clip; the
+    # date, time and resolution beneath it are not, at any window width.
+    for width in (1500, 1100, 760):
+        P.set_viewport_size({"width": width, "height": 950})
+        P.wait_for_timeout(150)
+        long_card = P.locator(f'.card[data-folder="{LONG_FOLDER}"]').first
+        specs = long_card.locator(".specs")
+        txt = specs.inner_text()
+        check(f"at {width}px the date survives beside the long folder",
+              "May 4, 2019" in txt, txt)
+        check(f"at {width}px so does the resolution",
+              re.search(r"\d+ × \d+ · \d+\.\d MP", txt) is not None, txt)
+        clipped = specs.evaluate("e => e.scrollWidth > e.clientWidth + 1")
+        check(f"at {width}px the specs line wraps instead of truncating", not clipped)
+    check("the folder itself is the one thing allowed to clip, and says so on hover",
+          P.locator(f'.card[data-folder="{LONG_FOLDER}"] .folder').first
+           .get_attribute("title") == LONG_FOLDER)
+    P.set_viewport_size({"width": 1500, "height": 950}); P.wait_for_timeout(150)
 
     def order(attr):
         return P.eval_on_selector_all(
@@ -235,7 +272,8 @@ with sync_playwright() as pw:
     folders = [f for f in order("folder") if f]
     check("sorted by folder", folders == sorted(folders), str(folders[:2]))
     check("folder sort uses the name as displayed, not the dated one",
-          set(folders) == {"Arches", "Mustang", "Wyoming"}, str(sorted(set(folders))))
+          set(folders) == {"Arches", "Mustang", "Wyoming", LONG_FOLDER},
+          str(sorted(set(folders))))
 
     P.select_option("#sort", "score-desc"); P.wait_for_timeout(300)
     scores = [float(x) for x in order("score")]
