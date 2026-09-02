@@ -477,7 +477,9 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
 - **`extracted_stills/`** — full-resolution frames pulled out of video clips, one
   subfolder per clip. Only created if the library contains video (see section 8).
 - **`calibration.json`** — the score scale fitted to this library. The file explains
-  itself when you open it (see section 7).
+  itself when you open it (see section 7). Written automatically and specific to
+  your photographs, so it is not worth committing; `calibration.example.json` in
+  the repository root shows its shape.
 - **`tags.json`** — your tags. Hand-authored, so `--reset` preserves it.
 
 ### On a phone or tablet
@@ -606,6 +608,10 @@ honours it, so newly scored folders are judged on the same scale.
 
 Change the proportions by editing `BAND_QUANTILES` in the script and re-running
 `--calibrate`. Delete `calibration.json` to return to the defaults.
+
+The file is generated, never hand-written, and describes one library — so it is
+git-ignored rather than shipped. `calibration.example.json` in the repository
+root shows the shape, carrying the shipped defaults.
 
 Calibration **rescales, it does not reorder** — your best photograph is the same
 photograph before and after. What changes is where the lines fall.
