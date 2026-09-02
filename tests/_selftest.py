@@ -212,7 +212,24 @@ check("highlight clipping penalised", blown.composite < best.composite)
 check("clipping mentioned", "highlights are blown" in blown.note)
 
 sec = mk(6.5, 5.5, 70.0, "secondary")
-check("secondary tier worded differently", "rather than a landscape" in sec.note, sec.note)
+# The tier is what discounts the score; it is no longer spelled out in words on
+# the card, where it was the same phrase on four cards in five.
+check("secondary tier is recorded", sec.subject_tier == "secondary", sec.subject_tier)
+check("and the note names the subject it matched",
+      sec.note.split(ps.NOTE_SEP)[2].lower() == ps.SECONDARY_PROMPTS[0][1].lower(),
+      sec.note)
+
+print("\n--- the feedback line is short and uniform")
+for res in (best, worst, soft, blown, sec):
+    parts = res.note.split(ps.NOTE_SEP)
+    check(f"{res.verdict:8s} -> {res.note}",
+          3 <= len(parts) <= 4
+          and parts[0].startswith("Aesthetic ") and parts[1].startswith("Technical ")
+          and parts[2][0].isupper()
+          and (len(parts) == 3 or parts[3] in ps.DEFECT_TEXTS))
+check("nothing the card already shows is repeated",
+      not any(g in res.note for res in (best, worst, soft, blown, sec)
+              for g in ("TOP PICK", "PASS", "/100", "execution", "squarely")))
 
 check("scores clamp at 100", mk(12.0, 9.0, 100.0, "primary").composite <= 100.0)
 check("scores clamp at 0", mk(0.0, 0.0, 0.0, "distractor", sharp=0.0).composite >= 0.0)

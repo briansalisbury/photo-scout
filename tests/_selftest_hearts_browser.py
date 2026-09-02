@@ -211,16 +211,18 @@ with sync_playwright() as pw:
     P.set_viewport_size({"width": 1400, "height": 950})
     P.goto(f"{ORIGIN}/live.html"); P.wait_for_timeout(700)
 
+    # Scoped to cards throughout: the overlay carries a heart row of its own,
+    # and it lives outside the gallery wrapper.
     def rows():
-        return P.eval_on_selector_all(".psc-hearts", "e => e.length")
+        return P.eval_on_selector_all(".psc-card .psc-hearts", "e => e.length")
     def shown_rows():
         return P.eval_on_selector_all(
-            ".psc-hearts:not(.psc-pending)", "e => e.length")
+            ".psc-card .psc-hearts:not(.psc-pending)", "e => e.length")
     def counts():
         return P.eval_on_selector_all(
-            ".psc-hcount", "e => e.map(x => x.textContent)")
+            ".psc-card .psc-hcount", "e => e.map(x => x.textContent)")
     def filled():
-        return P.eval_on_selector_all(".psc-heart.on", "e => e.length")
+        return P.eval_on_selector_all(".psc-card .psc-heart.on", "e => e.length")
 
     total = P.eval_on_selector_all(".psc-card", "e => e.length")
     check("cards rendered", total > 0, str(total))
@@ -230,6 +232,69 @@ with sync_playwright() as pw:
     check("nothing is hearted yet", filled() == 0)
     check("a zero count shows nothing rather than a 0",
           all(c == "" for c in counts()), str(counts()[:3]))
+
+    print("\n--- the heart inside the lightbox")
+    # One tally, two places showing it. Whichever is clicked, both must follow,
+    # and so must the service.
+    lbrow = ".psc-hearts-lb"
+    check("the overlay carries a heart of its own",
+          P.eval_on_selector_all(lbrow, "e => e.length") == 1)
+    check("it is hidden until a photograph is open",
+          P.eval_on_selector(lbrow, "e => e.classList.contains('psc-pending')"))
+
+    card0 = P.locator(".psc-card .psc-heart").first
+    pid0 = card0.get_attribute("data-photo-id")
+    card0.click(); P.wait_for_timeout(400)
+    P.locator(".psc-card img").first.click(); P.wait_for_timeout(400)
+    check("opening a photograph shows its heart",
+          not P.eval_on_selector(lbrow, "e => e.classList.contains('psc-pending')"))
+    check("pointed at the right photograph",
+          P.eval_on_selector(lbrow + " .psc-heart", "e => e.dataset.photoId") == pid0)
+    check("already filled, because the card was liked",
+          P.eval_on_selector(lbrow + " .psc-heart", "e => e.classList.contains('on')"))
+    check("and showing the count",
+          P.eval_on_selector(lbrow + " .psc-hcount", "e => e.textContent") == "1")
+
+    P.locator(lbrow + " .psc-heart").click(); P.wait_for_timeout(500)
+    check("unliking from the overlay clears the overlay",
+          not P.eval_on_selector(lbrow + " .psc-heart", "e => e.classList.contains('on')"))
+    check("and clears the card underneath",
+          not P.evaluate("""(pid) => document.querySelector(
+              '.psc-card .psc-heart[data-photo-id=\"' + pid + '\"]')
+              .classList.contains('on')""", pid0))
+    check("and the service agrees",
+          hearts.app.test_client().get("/api/hearts").json["counts"].get(pid0, 0) == 0)
+    check("tapping the heart does not dismiss the overlay",
+          P.eval_on_selector(".psc-lb", "e => e.classList.contains('open')"))
+
+    P.click(".psc-next"); P.wait_for_timeout(400)
+    pid1 = P.eval_on_selector(lbrow + " .psc-heart", "e => e.dataset.photoId")
+    check("the heart follows the photograph as you move", pid1 != pid0, pid1)
+    check("and shows that one's state, not the last one's",
+          not P.eval_on_selector(lbrow + " .psc-heart", "e => e.classList.contains('on')"))
+
+    P.locator(lbrow + " .psc-heart").click(); P.wait_for_timeout(500)
+    check("liking from the overlay counts",
+          P.eval_on_selector(lbrow + " .psc-hcount", "e => e.textContent") == "1")
+    check("and reaches the card, which was never touched",
+          P.evaluate("""(pid) => {
+              const b = document.querySelector(
+                '.psc-card .psc-heart[data-photo-id=\"' + pid + '\"]');
+              return b.classList.contains('on') &&
+                     b.closest('.psc-hearts').querySelector('.psc-hcount')
+                      .textContent === '1';
+          }""", pid1))
+    check("and the card's sort key, so Most liked stays honest",
+          P.evaluate("""(pid) => document.querySelector(
+              '.psc-card .psc-heart[data-photo-id=\"' + pid + '\"]')
+              .closest('.psc-card').dataset.hearts === '1'""", pid1))
+    # Put it back so the counts the rest of the suite asserts on are unchanged.
+    P.locator(lbrow + " .psc-heart").click(); P.wait_for_timeout(500)
+    P.click(".psc-lb .x"); P.wait_for_timeout(300)
+    check("leaving the overlay as we found it",
+          filled() == 0 and hearts.app.test_client().get("/api/hearts")
+                                  .json["counts"] == {},
+          str(hearts.app.test_client().get("/api/hearts").json["counts"]))
 
     print("\n--- clicking")
     first = P.locator(".psc-heart").first
@@ -297,12 +362,23 @@ with sync_playwright() as pw:
     STATE["broken"] = False
     P.reload(); P.wait_for_timeout(700)
     opts = P.eval_on_selector_all(".psc-sort option", "e => e.map(x => x.value)")
-    check("the dropdown offers it", "hearts-desc" in opts and "hearts-asc" in opts, str(opts[:3]))
-    check("and Most liked is the first choice offered", opts[0] == "hearts-desc", str(opts[0]))
+    check("the dropdown offers it", "hearts-desc" in opts and "hearts-asc" in opts, str(opts[:4]))
+    # Under the score options, not above them: first in the list is what the
+    # page opens on, and a gallery should open on its best photographs.
+    check("the page still opens on the highest scores",
+          opts[0] == "score-desc" and
+          P.eval_on_selector(".psc-sort", "e => e.value") == "score-desc",
+          P.eval_on_selector(".psc-sort", "e => e.value"))
+    check("the heart options sit directly under them",
+          opts[:4] == ["score-desc", "score-asc", "hearts-desc", "hearts-asc"],
+          str(opts[:4]))
+    check("and folder sorting comes before file name",
+          opts.index("folder-asc") < opts.index("name-asc"), str(opts))
 
     # Give three photographs different tallies, from three separate browsers, so
     # the counts are real rather than one person clicking repeatedly.
-    ids = P.eval_on_selector_all(".psc-heart", "e => e.map(x => x.dataset.photoId)")
+    ids = P.eval_on_selector_all(".psc-card .psc-heart",
+                                 "e => e.map(x => x.dataset.photoId)")
     plan = {ids[3]: 3, ids[1]: 2, ids[5]: 1}
     for pid, n in plan.items():
         for k in range(n):

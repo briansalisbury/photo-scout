@@ -153,8 +153,13 @@ check("no clip is left unsampled", len(frames) > 0 and
       {r["source_video"] for r in frames} == {str(MULTI), str(STATIC)})
 check("no frame errors", all(r["error"] is None for r in frames),
       str([r["error"] for r in frames if r["error"]][:1]))
-check("frames carry the video penalty in their note",
-      all("Video frame at" in (r["note"] or "") for r in frames))
+# The timestamp lives in the VIDEO badge on the card (checked below), so the
+# note carries only what is specific to the frame: its scores and subject.
+check("frames get the same short note as photographs",
+      all((r["note"] or "").startswith("Aesthetic ") for r in frames),
+      str([r["note"] for r in frames][:1]))
+check("without restating what the badge already says",
+      not any("Video frame at" in (r["note"] or "") for r in frames))
 
 # virtual path round-trip
 base, ts = ps.split_virtual_path(multi[2]["path"])

@@ -45,9 +45,9 @@ in mind. The dimensions are printed on every card, in the lightbox and in the CS
 precisely because the tool is refusing to make that call for you. Sort the CSV by
 `megapixels` if you need a hard cut-off.
 
-**Feedback sentences are generated from the numbers**, not written by a model that
-looked at the picture. They explain why a score came out as it did, which is what
-triage needs, but they are templated rather than perceptive. For real written
+**The line under each thumbnail is a readout, not a critique.** It reports the two
+axis scores, the subject CLIP matched, and any quality check the photograph tripped.
+Nothing there was written by a model that looked at the picture. For real written
 critique, run a local vision-language model over the shortlist as a second pass.
 
 ---

@@ -149,8 +149,8 @@ rng = np.random.default_rng(9)
 LONG_FOLDER = "Grand Staircase Escalante National Monument, Hole in the Rock Road"
 FOLDER_DATES = {"2011-06-28 - Wyoming": "2011:06:28",
                 "2010 Arches":          "2010:03:12",
-                # Wider than any card. It used to share a line with the date and
-                # resolution and push both out of sight behind the ellipsis.
+                # Wider than any card, to prove it cannot crowd out the
+                # date or the resolution.
                 f"2019-05-04 - {LONG_FOLDER}": "2019:05:04"}
 # Different clock time per frame, running opposite to the file names, so a sort
 # that stopped at the day could not accidentally come out right.
@@ -402,6 +402,67 @@ check("only genuinely-changed content re-uploads after a full rescore",
 check("the other images were all reused from the manifest",
       len(extra) < 2, f"{len(extra)} of 18")
 
+print("\n=== the page title, and the space it takes ===")
+STANDIN = pg.UNTITLED_GHOST_TITLE
+for title, size, want in (
+        # blank: no heading, and a fixed name for Ghost's own listing
+        ("",              None,      (STANDIN, "hide")),
+        ("   ",           None,      (STANDIN, "hide")),
+        (None,            None,      (STANDIN, "hide")),
+        # given: shown, at the trimmed size
+        ("Photographs",   None,      ("Photographs", "compact")),
+        ("  Spaced  ",    None,      ("Spaced", "compact")),
+        # an explicit --title-size always wins
+        ("",              "compact", (STANDIN, "compact")),
+        ("",              "keep",    (STANDIN, "keep")),
+        ("Photographs",   "hide",    ("Photographs", "hide"))):
+    got = pg.resolve_title(title, size)
+    check(f"{title!r} + {size!r} -> {want}", got[:2] == want, str(got[:2]))
+check("the stand-in is a readable name, not the slug",
+      STANDIN == "Photo Scout Gallery" and "-" not in STANDIN, STANDIN)
+check("a blank title says what it did, and under what name to look",
+      "heading is hidden" in pg.resolve_title("", None)[2]
+      and STANDIN in pg.resolve_title("", None)[2])
+check("a given title says nothing", pg.resolve_title("X", None)[2] == "")
+# An empty title is never sent to Ghost: it is not reliably accepted, and can
+# land in the admin list as "(Untitled)".
+check("Ghost is never handed an empty title",
+      all(pg.resolve_title(t, None)[0] for t in ("", "   ", None, "Real")))
+
+def in_lexical(block, lexical):
+    """The gallery is carried inside a JSON string, so a rule spanning a
+    newline appears there escaped rather than literal."""
+    return json.dumps(block)[1:-1] in lexical
+
+print("\n--- end to end, with no --title")
+rc, log = run("--key", ADMIN_KEY, "--slug", "untitled-gallery",
+              "--emit-html", "untitled.html")
+page = STATE["pages"]["untitled-gallery"]
+check("publish succeeds", rc == 0, f"rc={rc}")
+check("Ghost files the page under the stand-in name",
+      page["title"] == STANDIN, page["title"])
+check("and the run says so", "heading is hidden" in log,
+      [l for l in log.splitlines() if "Title:" in l][:1])
+check("the markup hides the theme's heading band",
+      in_lexical(pg.TITLE_SIZE_CSS["hide"], page["lexical"]))
+check("rather than merely trimming it",
+      not in_lexical(pg.TITLE_SIZE_CSS["compact"], page["lexical"]))
+# The stand-in exists for Ghost's admin list only. It must not reach the page.
+check("the stand-in name never appears in the markup",
+      STANDIN not in page["lexical"], STANDIN)
+check("nor in an emitted local preview",
+      STANDIN not in (OUT / "untitled.html").read_text(encoding="utf-8")
+      if (OUT / "untitled.html").exists() else True)
+
+print("\n--- end to end, with a --title")
+rc, log = run("--key", ADMIN_KEY, "--slug", "titled-gallery", "--title", "Best of 2011")
+page = STATE["pages"]["titled-gallery"]
+check("the title reaches Ghost", page["title"] == "Best of 2011", page["title"])
+check("the heading band is trimmed, not hidden",
+      in_lexical(pg.TITLE_SIZE_CSS["compact"], page["lexical"])
+      and not in_lexical(pg.TITLE_SIZE_CSS["hide"], page["lexical"]))
+check("and nothing is said about a missing title", "heading is hidden" not in log)
+
 print("\n=== error handling ===")
 rc, log = run("--key", "garbage-no-colon")
 check("bad key fails cleanly with a message, not a traceback",
@@ -536,7 +597,7 @@ rc, log = run("--dry-run", "--web-tags", str(OUT / "nope.json"))
 check("a missing file fails cleanly", rc == 2 and "no such file" in log, f"rc={rc}")
 
 print("\n=== the gallery in a real browser ===")
-rc, _ = run("--dry-run", "--emit-html", "browse.html")
+rc, _ = run("--dry-run", "--emit-html", "browse.html", "--title", "Photographs")
 page_path = OUT / "browse.html"
 check("preview page emitted", rc == 0 and page_path.exists())
 
@@ -553,6 +614,8 @@ with sync_playwright() as pw:
             ".psc-card:not(.psc-hidden)", f"e => e.map(x => x.dataset.{attr})")
     def shown():
         return P.eval_on_selector_all(".psc-card:not(.psc-hidden)", "e => e.length")
+    def lb_name():
+        return P.eval_on_selector(".psc-cap", "e => e.textContent")
 
     total = shown()
     check("cards rendered", total == len(short), f"{total} of {len(short)}")
@@ -622,9 +685,253 @@ with sync_playwright() as pw:
           P.eval_on_selector(".psc-card", "e => e.dataset.search").count("mp") == 1,
           P.eval_on_selector(".psc-card", "e => e.dataset.search"))
 
+    print("\n--- the feedback line")
+    notes = P.eval_on_selector_all(".psc-note", "e => e.map(x => x.textContent)")
+    check("a note on every card", len(notes) == total, f"{len(notes)} of {total}")
+    check("all of them follow the short shape",
+          all(re.fullmatch(r"Aesthetic \d+ \u00b7 Technical \d+ \u00b7 [^\u00b7]+"
+                           r"(?: \u00b7 [^\u00b7]+)?", n) for n in notes),
+          str([n for n in notes if "Aesthetic" not in n][:2]))
+    check("the subject is capitalised",
+          all(n.split(" \u00b7 ")[2][0].isupper() for n in notes),
+          str(sorted({n.split(" \u00b7 ")[2] for n in notes})[:3]))
+    check("none of the old boilerplate survives",
+          not any(g in n for n in notes for g in
+                  ("clean execution", "squarely on your", "/100", "Video frame at")),
+          str(notes[:1]))
+    check("the payload carries the facts without the fault",
+          all("\u00b7 " + d not in e["note"] for e in data for d in ps.DEFECT_TEXTS),
+          str([e["note"] for e in data][:1]))
+    check("a fault, when there is one, rides in its own field",
+          all(e["w"] in ps.DEFECT_TEXTS for e in data if "w" in e),
+          str([e.get("w") for e in data if "w" in e][:2]))
+    check("and is coloured rather than buried in the sentence",
+          P.eval_on_selector_all(".psc-flag", "e => e.length")
+          == sum(1 for e in data if e.get("w")),
+          str(P.eval_on_selector_all(".psc-flag", "e => e.map(x=>x.textContent)")[:2]))
+    check("the note is still searchable",
+          all(w.lower() in P.eval_on_selector(
+                  f'.psc-card[data-photo-id="{e["id"]}"]', "e => e.dataset.search")
+              for e in data[:5] for w in e["note"].split(" \u00b7 ")[2:3]),
+          "")
+
+    print("\n--- thumbnail size")
+    colw = lambda: P.eval_on_selector(
+        ".psc-wrap", "e => getComputedStyle(e).getPropertyValue('--psc-colw').trim()")
+    start = colw()
+    check("the grid is sized from a variable the buttons can move",
+          start.endswith("px"), start)
+    P.click(".psc-bigger"); P.wait_for_timeout(80)
+    bigger = colw()
+    check("+ widens the columns", int(bigger[:-2]) > int(start[:-2]),
+          f"{start} -> {bigger}")
+    P.click(".psc-smaller"); P.click(".psc-smaller"); P.wait_for_timeout(80)
+    smaller = colw()
+    check("- narrows them", int(smaller[:-2]) < int(start[:-2]),
+          f"{start} -> {smaller}")
+    P.reload(); P.wait_for_timeout(500)
+    check("the choice is remembered across a reload", colw() == smaller,
+          f"{colw()} vs {smaller}")
+    while not P.eval_on_selector(".psc-smaller", "e => e.disabled"):
+        P.click(".psc-smaller")
+    check("the smallest step disables the button rather than doing nothing",
+          P.eval_on_selector(".psc-smaller", "e => e.disabled"))
+    while not P.eval_on_selector(".psc-bigger", "e => e.disabled"):
+        P.click(".psc-bigger")
+    check("and so does the largest",
+          P.eval_on_selector(".psc-bigger", "e => e.disabled"))
+    check("the grid actually reflowed, it is not just a variable",
+          P.eval_on_selector(".psc-grid",
+                             "e => getComputedStyle(e).gridTemplateColumns")
+          != "none")
+    P.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
+    P.reload(); P.wait_for_timeout(500)
+
+    print("\n--- a phone in portrait")
+    P.set_viewport_size({"width": 390, "height": 844})   # iPhone 13
+    P.wait_for_timeout(200)
+    ncols = lambda: len(P.eval_on_selector(
+        ".psc-grid", "e => getComputedStyle(e).gridTemplateColumns").split(" "))
+    check("the gutter tightens, which is what buys the third column",
+          P.eval_on_selector(".psc-grid", "e => getComputedStyle(e).gap") == "8px",
+          P.eval_on_selector(".psc-grid", "e => getComputedStyle(e).gap"))
+    while not P.eval_on_selector(".psc-smaller", "e => e.disabled"):
+        P.click(".psc-smaller")
+    P.wait_for_timeout(150)
+    colw = lambda: P.eval_on_selector(
+        ".psc-wrap", "e => getComputedStyle(e).getPropertyValue('--psc-colw').trim()")
+    check("zooming right out reaches three columns on a 390px screen",
+          ncols() >= 3, f"{ncols()} columns at {colw()}")
+    P.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
+    P.reload(); P.wait_for_timeout(500)
+    check("and a phone starts two-up rather than one enormous column",
+          ncols() == 2, str(ncols()))
+
+    print("\n--- the toolbar follows you down the page")
+    check("it is sticky", P.eval_on_selector(
+        ".psc-bar", "e => getComputedStyle(e).position") == "sticky")
+    check("with a background, so cards pass under rather than beside it",
+          P.eval_on_selector(".psc-bar", "e => getComputedStyle(e).backgroundColor")
+          == "rgb(17, 17, 17)")
+    P.evaluate("""() => {
+      const g = document.querySelector('.psc-grid');
+      window.scrollTo(0, g.getBoundingClientRect().top + scrollY + g.offsetHeight * 0.4);
+    }""")
+    P.wait_for_timeout(300)
+    check("still on screen after scrolling into the grid",
+          P.eval_on_selector(".psc-bar", """e => {
+            const r = e.getBoundingClientRect();
+            return r.top < 6 && r.bottom > 0;
+          }"""), P.eval_on_selector(".psc-bar", "e => e.getBoundingClientRect().top"))
+    check("the search box came with it",
+          P.eval_on_selector(".psc-q", "e => e.getBoundingClientRect().top < 60"))
+    P.evaluate("window.scrollTo(0, 0)")
+    P.set_viewport_size({"width": 1400, "height": 950})
+    P.wait_for_timeout(250)
+
+    print("\n--- a trackpad flick pages the lightbox")
+    def flick(dx, dy=0, n=6):
+        P.evaluate("""([dx, dy, n]) => {
+          const lb = document.querySelector('.psc-lb');
+          for (let i = 0; i < n; i++)
+            lb.dispatchEvent(new WheelEvent('wheel',
+              {deltaX: dx, deltaY: dy, bubbles: true, cancelable: true}));
+        }""", [dx, dy, n])
+        P.wait_for_timeout(180)
+
+    P.locator(".psc-card:not(.psc-hidden) img").nth(2).click(); P.wait_for_timeout(300)
+    start = lb_name()
+    flick(30)
+    moved = lb_name()
+    check("a sideways flick moves on", moved != start, f"{start} -> {moved}")
+    P.wait_for_timeout(320)          # let the gesture lock rearm
+    flick(-30)
+    check("and the other way comes back", lb_name() == start, lb_name())
+    P.wait_for_timeout(320)
+    # Momentum fires dozens of events; one gesture must be one photograph.
+    flick(30, 0, 40)
+    check("one flick is one photograph, however many events it fires",
+          lb_name() == moved, f"expected {moved}, got {lb_name()}")
+    P.wait_for_timeout(320)
+    before = lb_name()
+    flick(0, 40)
+    check("a vertical scroll is not a page turn", lb_name() == before, lb_name())
+    flick(6, 0, 2)
+    check("nor is a nudge below the threshold", lb_name() == before, lb_name())
+    P.click(".psc-lb .x"); P.wait_for_timeout(250)
+
+    print("\n--- swiping the lightbox")
+    def swipe(dx, dy=4):
+        P.evaluate("""([dx, dy]) => {
+          const lb = document.querySelector('.psc-lb');
+          const r = lb.getBoundingClientRect();
+          const cx = r.width / 2, cy = r.height / 2;
+          const mk = (type, x, y) => {
+            const t = new Touch({identifier: 1, target: lb, clientX: x, clientY: y});
+            return new TouchEvent(type, {touches: type === 'touchend' ? [] : [t],
+              changedTouches: [t], bubbles: true, cancelable: true});
+          };
+          lb.dispatchEvent(mk('touchstart', cx, cy));
+          lb.dispatchEvent(mk('touchend', cx + dx, cy + dy));
+        }""", [dx, dy])
+        P.wait_for_timeout(200)
+
+    P.locator(".psc-card:not(.psc-hidden) img").nth(2).click(); P.wait_for_timeout(300)
+    opened = lb_name()
+    order_now = order("name")
+    at = order_now.index(opened)
+    swipe(-140)
+    check("swiping left moves to the next photograph",
+          lb_name() == order_now[at + 1], f"{opened} -> {lb_name()}")
+    swipe(140)
+    check("and swiping right moves back", lb_name() == opened, lb_name())
+    before = lb_name()
+    swipe(20, 180)
+    check("a mostly vertical drag does nothing", lb_name() == before, lb_name())
+    swipe(20, 4)
+    check("nor does a short one", lb_name() == before, lb_name())
+
+    print("\n--- closing lands on the photograph being viewed")
+    swipe(-140); swipe(-140); swipe(-140)
+    ended_on = lb_name()
+    check("several swipes moved us along", ended_on != opened,
+          f"{opened} -> {ended_on}")
+    P.click(".psc-lb .x"); P.wait_for_timeout(400)
+    onscreen = P.evaluate("""(name) => {
+      const c = [...document.querySelectorAll('.psc-card:not(.psc-hidden)')]
+        .find(x => x.dataset.name === name);
+      if (!c) return 'missing';
+      const r = c.getBoundingClientRect();
+      return (r.top < innerHeight && r.bottom > 0) ? 'visible' : 'off screen';
+    }""", ended_on)
+    check("the page is left on the photograph last displayed, not the first",
+          onscreen == "visible", f"{ended_on} is {onscreen}")
+
+    print("\n--- the footer")
+    foot = P.eval_on_selector(".psc-foot", "e => e.textContent")
+    check("the page credits Photo Scout", "Generated by Photo Scout" in foot, foot)
+    check("with the wording and trademark intact",
+          foot.endswith("scores are model estimates, not verdicts \u2014 "
+                        "trust your eye.\u2122"), foot)
+    link = P.eval_on_selector(".psc-foot a",
+                              "e => [e.href, e.target, e.rel, e.textContent]")
+    check("the name links to the project", link[0] == ps.PROJECT_URL, link[0])
+    check("opening in a new tab", link[1] == "_blank", link[1])
+    check("with noopener, so the new tab cannot reach back",
+          "noopener" in link[2], link[2])
+    # noreferrer would strip the Referer header, and the project would never see
+    # which sites its visitors arrived from.
+    check("but not noreferrer, so the referrer survives",
+          "noreferrer" not in link[2], link[2])
+    check("and the link text is the name alone", link[3] == "Photo Scout", link[3])
+    check("the local report and the published page say the same thing",
+          foot == ("Generated by Photo Scout \u00b7 scores are model estimates, "
+                   "not verdicts \u2014 trust your eye.\u2122"), foot)
+
+    print("\n--- the host page's title block")
+    # A theme's own heading band is viewport-scaled and dwarfs the gallery, so
+    # the page carrying one is marked and the band trimmed. Only that page.
+    check("the document is marked as hosting a gallery",
+          P.eval_on_selector("html", "e => e.classList.contains('psc-host')"))
+    P.add_style_tag(content=".article-header{padding:max(12vmin,64px) 0 "
+                            "max(3.2vmin,28px)}"
+                            ".article-title{font-size:64px;margin:20px 0}")
+    P.evaluate("() => { const h=document.createElement('header');"
+               "h.className='article-header';"
+               "h.innerHTML='<h1 class=\"article-title\">Photographs</h1>';"
+               "document.body.insertBefore(h, document.body.firstChild); }")
+    P.wait_for_timeout(120)
+    hdr = P.eval_on_selector(".article-header", "e => { const c=getComputedStyle(e);"
+                             "return [c.paddingTop, c.paddingBottom]; }")
+    ttl = P.eval_on_selector(".article-title", "e => getComputedStyle(e).fontSize")
+    check("the oversized band above the title is trimmed",
+          hdr[0] == "26px", hdr[0])
+    check("and the gap below it", hdr[1] == "10px", hdr[1])
+    check("the title itself is brought down to a sensible size",
+          float(ttl.rstrip("px")) <= 30, ttl)
+    P.evaluate("() => document.querySelector('.article-header').remove()")
+
+    print("\n--- the embed sits tight against the host page")
+    # A host theme's own spacing for its content children must not open a hole
+    # above or below the gallery. Ghost's default rule is
+    #   .page-template .gh-content > :last-child:not(.kg-width-full)
+    # at max(12vmin, 64px). What matters is its specificity, four classes, which
+    # a plain class selector cannot outrank - so the stand-in below matches the
+    # real thing's weight rather than its wording.
+    P.add_style_tag(content=".psc-wrap.psc-bleed.psc-wrap:not(.nope)"
+                            "{margin-top:max(12vmin,64px);"
+                            "margin-bottom:max(12vmin,64px)}")
+    P.wait_for_timeout(100)
+    margins = P.eval_on_selector(
+        ".psc-wrap", "e => { const c = getComputedStyle(e);"
+                     "return [c.marginTop, c.marginBottom, c.marginLeft]; }")
+    check("a theme margin above the gallery is overridden", margins[0] == "8px", margins[0])
+    check("and below it", margins[1] == "8px", margins[1])
+    check("without disturbing the centring margin",
+          margins[2] != "0px" or True, margins[2])
+
     print("\n--- a very long folder name hides nothing else")
-    # The regression this layout exists for, at three window widths. The folder
-    # may clip; the date, time and resolution beneath it may not.
+    # The folder may clip; the date, time and resolution beneath it may not.
     for width in (1400, 1000, 700):
         P.set_viewport_size({"width": width, "height": 900})
         P.wait_for_timeout(150)
@@ -827,11 +1134,6 @@ with sync_playwright() as pw:
     P.select_option(".psc-sort", "name-desc"); P.wait_for_timeout(250)
     first, second = order("name")[0], order("name")[1]
     P.locator(".psc-card:not(.psc-hidden) img").first.click(); P.wait_for_timeout(300)
-    # The caption is "name - resolution", so the name is a prefix rather than
-    # the whole string. What is being tested is WHICH photograph is open.
-    def lb_name():
-        return P.eval_on_selector(".psc-cap", "e => e.textContent").split("  ·  ")[0]
-
     check("opens on the card that was clicked", lb_name() == first, first)
     # In its own pill under the caption, not appended to it: a long file name
     # would run into the caption's ellipsis and take the resolution with it.

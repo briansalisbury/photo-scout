@@ -120,7 +120,15 @@ import photo_scout as ps  # noqa: E402
 # re-upload the entire gallery as duplicates.
 PUBLISH_DB = "publish.sqlite3"
 DEFAULT_SLUG = "photo-scout"
-DEFAULT_TITLE = "Photographs"
+# Blank by default: the gallery is the page, and a heading above it is usually
+# just another thing to scroll past. A blank title also hides the theme's whole
+# heading band - see resolve_title().
+DEFAULT_TITLE = ""
+
+# What Ghost files an untitled page under. Nothing displays it - the heading is
+# hidden - but the admin list needs a name, and an empty one is not reliably
+# accepted by the API.
+UNTITLED_GHOST_TITLE = "Photo Scout Gallery"
 UPLOAD_PREFIX = "psc"               # marks our uploads in Ghost's media library
 
 # Only these verdicts are published.
@@ -568,11 +576,42 @@ def publish_images(client: Optional[GhostClient], manifest: Manifest,
 # The gallery markup
 # ---------------------------------------------------------------------------
 
+# CSS for the host page's own title block, chosen by --title-size. A Ghost theme
+# usually gives that block a viewport-scaled band - the default is
+# max(12vmin, 64px) above the title - which dwarfs a gallery embedded below it.
+#
+# The rules are scoped by a .psc-host class the gallery's own script puts on
+# <html>, so only a page actually carrying a gallery is affected, and the
+# selector works in browsers without :has(). The class names cover the headers
+# Ghost's own themes have shipped over the years; an unrecognised theme keeps
+# its spacing and nothing breaks.
+_HOST_HEADER = ":is(.article-header,.gh-article-header,.post-full-header,.gh-canvas>.post-full-header)"
+_HOST_TITLE = ":is(.article-title,.gh-article-title,.post-full-title,.page-title)"
+
+TITLE_SIZE_CSS = {
+    "keep": "",
+    "compact": (
+        f".psc-host {_HOST_HEADER}{{padding-top:26px!important;"
+        f"padding-bottom:10px!important}}\n"
+        f".psc-host {_HOST_TITLE}{{font-size:clamp(20px,2.6vw,30px)!important;"
+        f"margin:0!important;line-height:1.2!important}}"
+    ),
+    "hide": f".psc-host {_HOST_HEADER}{{display:none!important}}",
+}
+
 GALLERY_CSS = """
 <style>
-.psc-wrap{--psc-bg:#111;--psc-fg:#e8e8e8;--psc-mut:#9a9a9a;--psc-card:#1b1b1b;--psc-line:#2c2c2c}
-.psc-wrap{background:var(--psc-bg);color:var(--psc-fg);padding:16px;border-radius:12px;
+.psc-wrap{--psc-bg:#111;--psc-fg:#e8e8e8;--psc-mut:#9a9a9a;--psc-card:#1b1b1b;--psc-line:#2c2c2c;
+  --psc-colw:__COLW__px}
+.psc-wrap{background:var(--psc-bg);color:var(--psc-fg);padding:10px 16px;border-radius:12px;
   font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box}
+/* Themes space the children of their content area generously - Ghost's own
+   default is max(12vmin,64px), which is a visible hole under a full-width embed
+   on a tall screen. !important because those rules are usually more specific
+   than anything addressable from here, and the theme's selector is not knowable
+   in advance. Only this element is affected. Set with --gap; a negative value
+   tucks the gallery up under the page title. */
+.psc-wrap.psc-wrap{margin-top:__GAPPX__!important;margin-bottom:__GAPPX__!important}
 /* Ghost themes constrain page content to a narrow reading column - typically
    around 720px - which would pin this grid at two columns on any monitor. Break
    out of that column and size against the viewport instead.
@@ -586,17 +625,34 @@ GALLERY_CSS = """
 .psc-wrap.psc-bleed{width:min(96vw,__MAXW__px);
   margin-left:calc((100% - min(96vw,__MAXW__px)) / 2)}
 @media (max-width:600px){.psc-wrap.psc-bleed{width:100%;margin-left:0;
-  border-radius:0;padding:10px}}
-.psc-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  border-radius:0;padding:8px 10px}}
+/* Sticks to the top so the filters and the search box stay reachable a
+   thousand photographs down. The negative margins let its background run to
+   the edge of the gallery, so cards scroll under it rather than beside it.
+   z-index stays below the lightbox, which is 100 and re-parented to <body>. */
+.psc-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+  position:sticky;top:0;z-index:5;background:var(--psc-bg);
+  margin:0 -16px 14px;padding:10px 16px;border-bottom:1px solid var(--psc-line)}
 .psc-bar button,.psc-bar select,.psc-bar input{background:#242424;color:var(--psc-fg);
   border:1px solid #3a3a3a;border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer}
 .psc-bar button.on{background:#2f6f4f;border-color:#3f8f68}
 .psc-bar input{flex:1;min-width:180px;cursor:text}
 .psc-count{color:var(--psc-mut);font-size:12.5px;margin-left:auto}
+/* Thumbnail size. A touchscreen has no ctrl+scroll, and pinching zooms the
+   whole page rather than reflowing the grid, so the columns get their own
+   control. 34px square clears the 24px minimum for a comfortable tap. */
+.psc-zoom{display:inline-flex;gap:4px}
+.psc-zoom button{min-width:34px;padding:6px 9px;font-size:15px;line-height:1;
+  font-variant-numeric:tabular-nums}
+.psc-zoom button[disabled]{opacity:.35;cursor:default}
+.psc-foot{color:#777;font-size:12px;text-align:center;padding:18px 0 4px}
+.psc-foot a{color:#9a9a9a;text-decoration:none;border-bottom:1px solid #3a3a3a}
+.psc-foot a:hover{color:var(--psc-fg);border-bottom-color:#6a6a6a}
+__HEADCSS__
 /* min(100%,Npx) stops a single column from overflowing a container narrower
    than the track minimum, which is what produces sideways scroll on phones. */
 .psc-grid{display:grid;gap:14px;
-  grid-template-columns:repeat(auto-fill,minmax(min(100%,__COLW__px),1fr))}
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--psc-colw)),1fr))}
 .psc-card{background:var(--psc-card);border:1px solid var(--psc-line);border-radius:10px;overflow:hidden}
 .psc-card img{width:100%;aspect-ratio:3/2;object-fit:cover;background:#000;display:block;cursor:zoom-in}
 .psc-body{padding:9px 11px 11px}
@@ -620,6 +676,7 @@ GALLERY_CSS = """
    of any one of them. A date split over two lines reads as a typo. */
 .psc-specs span{white-space:nowrap}
 .psc-note{color:#b6b6b6;font-size:12px;margin-top:5px}
+.psc-flag{color:#d9a441}
 .psc-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;align-items:center}
 .psc-tag{font-size:11px;padding:3px 7px;border-radius:99px;display:inline-flex;
   align-items:center;gap:5px;line-height:1.35;
@@ -707,8 +764,22 @@ GALLERY_CSS = """
   background:rgba(0,0,0,.45);padding:3px 12px;border-radius:99px;z-index:2;
   white-space:nowrap;font-variant-numeric:tabular-nums}
 .psc-dims-lb:empty{display:none}
+.psc-hearts-lb{position:absolute;bottom:14px;left:20px;z-index:2;margin:0;
+  background:rgba(0,0,0,.45);padding:5px 14px;border-radius:99px}
+.psc-hearts-lb .psc-heart{font-size:20px}
+.psc-hearts-lb .psc-hcount{color:#ddd;font-size:13px;
+  font-variant-numeric:tabular-nums}
 @media (max-width:600px){.psc-nav{width:44px;height:64px;font-size:22px}
   .psc-prev{left:6px} .psc-next{right:6px} .psc-cap{max-width:50vw}}
+
+/* Narrow screens. These must come after the rules they override: a media query
+   carries no extra specificity, so a base rule declared later would win. */
+@media (max-width:600px){
+  /* On a 390px phone the gutter, not the column width, is what keeps a third
+     column off the screen: three 115px columns need 361px at 8px, 373px at 14. */
+  .psc-grid{gap:8px}
+  .psc-bar{margin-left:-10px;margin-right:-10px;padding:8px 10px}
+}
 </style>
 """
 
@@ -718,6 +789,9 @@ GALLERY_JS = r"""
   var root = document.currentScript.closest('.psc-wrap') ||
              document.querySelector('.psc-wrap');
   if (!root) return;
+  // Lets the stylesheet reach the host page's title block without affecting
+  // any other page on the site.
+  document.documentElement.classList.add('psc-host');
   var DATA = JSON.parse(root.querySelector('.psc-data').textContent);
   var grid = root.querySelector('.psc-grid');
   var lb = root.querySelector('.psc-lb'), lbImg = lb.querySelector('img');
@@ -730,6 +804,16 @@ GALLERY_JS = r"""
   // Empty when the gallery was published without --hearts-url, in which case
   // no heart button is rendered at all.
   var HEARTS_API = root.dataset.hearts || '';
+  // The overlay's own heart row, and the hook the hearts client fills in. Both
+  // stay null when no heart service is configured.
+  var lbHearts = lb.querySelector('.psc-hearts-lb');
+  var paintLbHeart = null;
+  // Which photograph the overlay is showing, or '' when it is closed.
+  function lbOpenOn(){
+    if (!lb.classList.contains('open') || cur < 0 || !order.length) return '';
+    var p = DATA[order[cur]];
+    return p ? p.id : '';
+  }
 
   function hue(s){var h=0;s=s.toLowerCase();
     for(var i=0;i<s.length;i++)h=(h*31+s.charCodeAt(i))>>>0;
@@ -765,7 +849,8 @@ GALLERY_JS = r"""
     // every search is case-insensitive in both directions.
     c.dataset.search = ((p.n||'') + ' ' + (p.f||'') + ' ' + (p.fr||'') + ' ' +
                         (p.d||'') + ' ' + pd + ' ' + (p.r||'') + ' ' +
-                        (p.v||'') + ' ' + (p.note||'')).toLowerCase();
+                        (p.v||'') + ' ' + (p.note||'') + ' ' +
+                        (p.w||'')).toLowerCase();
     // Tags are NOT baked into data-search: they change while the page is open,
     // and apply() reads the live data-tags attribute for them instead.
     c.dataset.idx = i;
@@ -800,10 +885,9 @@ GALLERY_JS = r"""
       mt.title = p.f;
       b.appendChild(mt);
     }
-    // Date, time, dimensions and megapixels below it. Split back apart and each
-    // wrapped in its own span so the line can wrap BETWEEN facts and never
-    // through the middle of one. Both prettyDate and the resolution string are
-    // built with the same ' \u00b7 ' separator, so one split recovers all four.
+    // Split back into individual facts so the line can wrap between them and
+    // never through one. prettyDate and the resolution share a separator, so a
+    // single split recovers all four.
     var specs = [pd, p.r || ''].filter(Boolean).join(' \u00b7 ').split(' \u00b7 ');
     if (specs[0]){
       var sp = document.createElement('div'); sp.className = 'psc-specs';
@@ -815,8 +899,16 @@ GALLERY_JS = r"""
       });
       b.appendChild(sp);
     }
-    if (p.note){var nt=document.createElement('div');nt.className='psc-note';
-      nt.textContent=p.note;b.appendChild(nt);}
+    if (p.note || p.w){
+      var nt=document.createElement('div'); nt.className='psc-note';
+      nt.textContent = p.note || '';
+      if (p.w){
+        nt.appendChild(document.createTextNode(' \u00b7 '));
+        var fl=document.createElement('span'); fl.className='psc-flag';
+        fl.textContent=p.w; nt.appendChild(fl);
+      }
+      b.appendChild(nt);
+    }
 
     // Editable tag row. Chips are painted in renderCardTags once TAGS has been
     // merged with whatever this visitor stored last time.
@@ -1231,6 +1323,43 @@ GALLERY_JS = r"""
   var sortSel = root.querySelector('.psc-sort');
   if (sortSel) sortSel.onchange = function(e){ sortCards(e.target.value); apply(); };
 
+  // ---- thumbnail size -----------------------------------------------------
+  // Pinching a phone zooms the page, which magnifies one column rather than
+  // showing more; these reflow the grid instead. The chosen step is remembered
+  // per page, so a visitor who prefers a dense contact sheet keeps it.
+  (function zoom(){
+    var STEPS = [100, 115, 130, 160, 200, 240, 300, 380, 480, 620];
+    var smaller = root.querySelector('.psc-smaller'),
+        bigger  = root.querySelector('.psc-bigger');
+    if (!smaller || !bigger) return;
+    var KEY = 'psc-colw:' + location.pathname;
+    var base = parseInt(getComputedStyle(root).getPropertyValue('--psc-colw'), 10) || 260;
+    // Start from the step nearest the width the page was published with, so
+    // --column-width still sets the default a first-time visitor sees.
+    // A narrow screen starts two-up: one column at the published width fills a
+    // phone, which is not a contact sheet. Any saved choice still wins.
+    var want = innerWidth < 600 ? 160 : base;
+    var at = 0;
+    STEPS.forEach(function(w, i){
+      if (Math.abs(w - want) < Math.abs(STEPS[at] - want)) at = i;
+    });
+    try {
+      var saved = STEPS.indexOf(parseInt(localStorage.getItem(KEY), 10));
+      if (saved >= 0) at = saved;
+    } catch (e) {}
+
+    function apply(){
+      root.style.setProperty('--psc-colw', STEPS[at] + 'px');
+      smaller.disabled = at === 0;
+      bigger.disabled = at === STEPS.length - 1;
+      try { localStorage.setItem(KEY, STEPS[at]); } catch (e) {}
+    }
+    smaller.addEventListener('click', function(){ if (at > 0) { at--; apply(); } });
+    bigger.addEventListener('click', function(){
+      if (at < STEPS.length - 1) { at++; apply(); } });
+    apply();
+  })();
+
   // ---- hearts -------------------------------------------------------------
   // Everything below is wrapped so that any failure - service down, network
   // blocked, adblocker, CDN in the way - leaves the gallery completely
@@ -1270,6 +1399,10 @@ GALLERY_JS = r"""
       });
     }
 
+    // The tally for each photograph, so the card and the overlay always agree
+    // no matter which one was clicked.
+    var TALLY = {};
+
     function paintRow(row, count, mine){
       var btn = row.querySelector('.psc-heart');
       var num = row.querySelector('.psc-hcount');
@@ -1285,14 +1418,35 @@ GALLERY_JS = r"""
       row.dataset.mine = mine ? '1' : '';
     }
 
+    // Paint every row showing this photograph - its card, and the overlay if it
+    // happens to be open on it.
+    function paintPhoto(id, count, mine){
+      TALLY[id] = {count: count, mine: !!mine};
+      var sel = '.psc-heart[data-photo-id="' + id + '"]';
+      [root, lb].forEach(function(scope){
+        var btn = scope.querySelector(sel);
+        if (btn) paintRow(btn.closest('.psc-hearts'), count, mine);
+      });
+    }
+
+    // Called by show() as the overlay moves between photographs.
+    paintLbHeart = function(id){
+      if (!lbHearts) return;
+      var t = TALLY[id];
+      lbHearts.querySelector('.psc-heart').dataset.photoId = id;
+      lbHearts.classList.toggle('psc-pending', !t);
+      if (t) paintRow(lbHearts, t.count, t.mine);
+    };
+
     api('', {method: 'GET'}).then(function(data){
       var counts = data.counts || {}, mine = {};
       (data.mine || []).forEach(function(id){ mine[id] = true; });
       rows.forEach(function(row){
         var id = row.querySelector('.psc-heart').dataset.photoId;
-        paintRow(row, counts[id] || 0, !!mine[id]);
+        paintPhoto(id, counts[id] || 0, !!mine[id]);
         row.classList.remove('psc-pending');    // reveal only on success
       });
+      if (lbOpenOn()) paintLbHeart(lbOpenOn());
       // The tallies arrive after the grid is built, so a visitor who is already
       // on "Most liked" would be looking at an order built from zeroes.
       // Deliberately NOT re-sorted when someone clicks a heart: photographs
@@ -1307,32 +1461,38 @@ GALLERY_JS = r"""
       // does not need to see that a feature they never knew about is down.
     });
 
-    root.addEventListener('click', function(ev){
+    // Both scopes: the overlay is re-parented to <body> and no longer bubbles
+    // up to the gallery root.
+    [root, lb].forEach(function(scope){
+    scope.addEventListener('click', function(ev){
       var btn = ev.target.closest && ev.target.closest('.psc-heart');
       if (!btn) return;
+      ev.stopPropagation();          // in the overlay, the backdrop closes
       var row = btn.closest('.psc-hearts');
       if (!row || row.classList.contains('psc-pending')) return;
 
       // Optimistic: the button responds instantly, and is put back if the
       // request fails. On this host the round trip is a few milliseconds, so a
       // spinner would flicker rather than inform.
-      var wasMine = !!row.dataset.mine;
-      var wasCount = parseInt(row.dataset.count || '0', 10);
-      var nowMine = !wasMine;
-      paintRow(row, Math.max(0, wasCount + (nowMine ? 1 : -1)), nowMine);
+      var id = btn.dataset.photoId;
+      var was = TALLY[id] || {count: parseInt(row.dataset.count || '0', 10),
+                              mine: !!row.dataset.mine};
+      var nowMine = !was.mine;
+      paintPhoto(id, Math.max(0, was.count + (nowMine ? 1 : -1)), nowMine);
       btn.disabled = true;
 
-      api('/' + btn.dataset.photoId, {method: nowMine ? 'POST' : 'DELETE'})
+      api('/' + id, {method: nowMine ? 'POST' : 'DELETE'})
         .then(function(res){
           // Trust the server's number over the optimistic one: another
           // visitor may have hearted the same photograph in between.
-          paintRow(row, res.count, res.hearted);
+          paintPhoto(id, res.count, res.hearted);
         })
         .catch(function(){
-          paintRow(row, wasCount, wasMine);
+          paintPhoto(id, was.count, was.mine);
           toast('Could not save that like - the service may be down');
         })
         .then(function(){ btn.disabled = false; });
+    });
     });
   })();
 
@@ -1366,6 +1526,7 @@ GALLERY_JS = r"""
     // Kept out of the caption: a long file name would push it past the
     // ellipsis, and this is the view where resolution actually matters.
     lbDims.textContent = p.r || '';
+    if (paintLbHeart) paintLbHeart(p.id);
     lbCount.textContent = (cur + 1) + ' / ' + order.length;
     var many = order.length > 1;
     navPrev.style.display = many ? 'flex' : 'none';
@@ -1404,10 +1565,33 @@ GALLERY_JS = r"""
     setScrollLock(true);
   }
   function closeLb(){
+    // Leave the page on the photograph being looked at, not the one that was
+    // clicked several swipes ago.
+    var card = cur >= 0 && order.length
+      ? grid.querySelector('.psc-card[data-idx="' + order[cur] + '"]') : null;
     lb.classList.remove('open');
     lbImg.src='';
     setScrollLock(false);
+    if (card && !card.classList.contains('psc-hidden'))
+      card.scrollIntoView({block: 'center'});
   }
+
+  // Swipe between photographs. A drag is a swipe only when it is decisively
+  // sideways: a mostly-vertical one is someone trying to dismiss or scroll,
+  // and a short one is a tap that wandered.
+  var tx = 0, ty = 0, tracking = false;
+  lb.addEventListener('touchstart', function(e){
+    if (e.touches.length !== 1) { tracking = false; return; }
+    tracking = true; tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+  }, {passive: true});
+  lb.addEventListener('touchend', function(e){
+    if (!tracking || order.length < 2) return;
+    tracking = false;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - tx, dy = t.clientY - ty;
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    step(dx < 0 ? 1 : -1);
+  }, {passive: true});
   // Backdrop closes; the photo and the arrows must not.
   lb.addEventListener('click', function(e){ if (e.target === lb) closeLb(); });
   lbImg.addEventListener('click', function(e){ e.stopPropagation(); });
@@ -1420,6 +1604,22 @@ GALLERY_JS = r"""
   // passive:false or preventDefault is ignored.
   function blockScroll(e){ if (lb.classList.contains('open')) e.preventDefault(); }
   lb.addEventListener('wheel', blockScroll, {passive: false});
+  // A two-finger sideways flick on a trackpad arrives as wheel events carrying
+  // deltaX. Momentum fires dozens of them, so the accumulator locks after one
+  // step and only rearms once the flick has died down.
+  var wacc = 0, wlock = false, wtimer = null;
+  lb.addEventListener('wheel', function(e){
+    if (!lb.classList.contains('open') || order.length < 2) return;
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;   // vertical: not ours
+    clearTimeout(wtimer);
+    wtimer = setTimeout(function(){ wacc = 0; wlock = false; }, 240);
+    if (wlock) return;
+    wacc += e.deltaX;
+    if (Math.abs(wacc) < 60) return;
+    var dir = wacc < 0 ? -1 : 1;
+    wacc = 0; wlock = true;
+    step(dir);
+  }, {passive: true});
   lb.addEventListener('touchmove', blockScroll, {passive: false});
   document.addEventListener('keydown', function(e){
     if (!lb.classList.contains('open')) return;
@@ -1439,6 +1639,7 @@ GALLERY_JS = r"""
 def build_gallery_html(items: list[dict], tags_by_id: dict,
                        local: bool = False, bleed: bool = True,
                        max_width: int = 1800, col_width: int = 260,
+                       gap: int = 8, title_size: str = "compact",
                        hearts_url: str = "") -> str:
     """
     One self-contained HTML card.
@@ -1452,6 +1653,7 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
     """
     payload = []
     for it in items:
+        note_main, note_flag = ps.split_note(it["note"])
         entry = {
             "id": it["photo_id"],
             "v": it["verdict"],
@@ -1469,7 +1671,10 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
             # '6000 x 4000 - 24.0 MP'. Pre-rendered here rather than sent as two
             # numbers: the browser would only ever format it this one way.
             "r": it.get("resolution") or "",
-            "note": it["note"],
+            # The facts, and separately any named fault, which the page
+            # colours so it can be scanned rather than read.
+            "note": note_main,
+            **({"w": note_flag} if note_flag else {}),
             # local=True renders straight from the files beside this page, so a
             # dry run shows the real gallery rather than a grid of broken images.
             "th": (it.get("thumb_rel") or it.get("preview_rel")) if local
@@ -1492,7 +1697,9 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
     strong = sum(1 for i in items if i["verdict"] == "STRONG")
 
     css = (GALLERY_CSS.replace("__MAXW__", str(max_width))
-                      .replace("__COLW__", str(col_width)))
+                      .replace("__COLW__", str(col_width))
+                      .replace("__GAPPX__", f"{gap}px")
+                      .replace("__HEADCSS__", TITLE_SIZE_CSS[title_size]))
     # No endpoint means no heart buttons at all, rather than dead ones.
     hearts_attr = (f' data-hearts="{html.escape(hearts_url, quote=True)}"'
                    if hearts_url else "")
@@ -1514,19 +1721,28 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         '<span class="psc-tagmenu"></span>'
         '</span>'
         '<select class="psc-sort" title="Sort order">'
+        # Score first, so it is what the page opens on. The heart options sit
+        # under it rather than above: with them first, a gallery published with
+        # a heart service would have defaulted to Most liked.
+        '<option value="score-desc">Score, highest first</option>'
+        '<option value="score-asc">Score, lowest first</option>'
         + (('<option value="hearts-desc">Most liked</option>'
             '<option value="hearts-asc">Least liked</option>') if hearts_url else '') +
-        '<option value="score-desc">Rating, best first</option>'
-        '<option value="score-asc">Rating, worst first</option>'
         '<option value="date-desc">Date, newest first</option>'
         '<option value="date-asc">Date, oldest first</option>'
-        '<option value="name-asc">File name A-Z</option>'
-        '<option value="name-desc">File name Z-A</option>'
         '<option value="folder-asc">Folder A-Z</option>'
         '<option value="folder-desc">Folder Z-A</option>'
+        '<option value="name-asc">File name A-Z</option>'
+        '<option value="name-desc">File name Z-A</option>'
         '</select>'
         '<button class="psc-save" type="button" '
         'title="Download your tags as a file">Save tags</button>'
+        '<span class="psc-zoom">'
+        '<button class="psc-smaller" type="button" aria-label="Smaller thumbnails" '
+        'title="Smaller thumbnails, more per row">&minus;</button>'
+        '<button class="psc-bigger" type="button" aria-label="Larger thumbnails" '
+        'title="Larger thumbnails, fewer per row">+</button>'
+        '</span>'
         f'<span class="psc-count">{top + strong} of {top + strong}</span>'
         '</div>'
         '<div class="psc-toast"></div>'
@@ -1536,12 +1752,40 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         '<button class="psc-nav psc-prev" type="button" aria-label="Previous">&#8249;</button>'
         '<button class="psc-nav psc-next" type="button" aria-label="Next">&#8250;</button>'
         '<span class="psc-cap"></span><span class="psc-dims-lb"></span>'
+        + ('<div class="psc-hearts psc-hearts-lb psc-pending">'
+           '<button class="psc-heart" type="button" aria-pressed="false">'
+           '\u2764\ufe0f</button><span class="psc-hcount"></span></div>'
+           if hearts_url else '') +
         '<span class="psc-count-lb"></span>'
         '<img alt=""></div>'
+        '<div class="psc-foot">Generated by '
+        # noopener, deliberately without noreferrer: the latter would strip the
+        # Referer header and the project would never see where its visitors came
+        # from. noopener is the half that matters for security.
+        f'<a href="{html.escape(ps.PROJECT_URL, quote=True)}" target="_blank" '
+        'rel="noopener">Photo Scout</a> &middot; scores are model '
+        'estimates, not verdicts &mdash; trust your eye.&trade;</div>'
         f'<script type="application/json" class="psc-data">{data_json}</script>'
         + GALLERY_JS +
         '</div>'
     )
+
+
+def resolve_title(title: str, title_size: Optional[str]) -> tuple[str, str, str]:
+    """
+    Work out (title to store in Ghost, heading treatment, what to tell the user).
+
+    A blank --title means "no heading on the page". Ghost still needs a name to
+    file the page under, so UNTITLED_GHOST_TITLE stands in and the heading is
+    hidden instead. Passing --title-size explicitly overrides that, which is the
+    way to see the stand-in if you ever want it.
+    """
+    title = (title or "").strip()
+    if title:
+        return title, (title_size or "compact"), ""
+    return UNTITLED_GHOST_TITLE, (title_size or "hide"), (
+        f"No --title given, so the page heading is hidden. Ghost will list this "
+        f"page as '{UNTITLED_GHOST_TITLE}'.")
 
 
 def lexical_with_html_card(inner_html: str) -> str:
@@ -1717,7 +1961,10 @@ def main(argv=None) -> int:
     ap.add_argument("--out", help="photo_scout output directory "
                                   "(default: _photo_scout beside this script)")
     ap.add_argument("--slug", default=DEFAULT_SLUG, help=f"Page slug (default {DEFAULT_SLUG})")
-    ap.add_argument("--title", default=DEFAULT_TITLE, help="Page title")
+    ap.add_argument("--title", default=DEFAULT_TITLE,
+                    help="Heading shown above the gallery. Blank by default, "
+                         "which also collapses the theme's heading band so the "
+                         "photographs start at the top of the page.")
     ap.add_argument("--status", choices=("draft", "published"), default="draft",
                     help="Publish state of the Ghost page (default draft, so you "
                          "can look before it goes live)")
@@ -1734,6 +1981,18 @@ def main(argv=None) -> int:
     ap.add_argument("--column-width", type=int, default=260, metavar="PX",
                     help="Minimum width of a grid column; smaller means more "
                          "columns (default 260)")
+    ap.add_argument("--gap", type=int, default=8, metavar="PX",
+                    help="Space above and below the gallery within the host page "
+                         "(default 8). Themes often add a large margin here; this "
+                         "replaces it. Negative values are allowed, and tuck the "
+                         "gallery up closer to the page title.")
+    ap.add_argument("--title-size", choices=("compact", "keep", "hide"),
+                    default=None,
+                    help="What to do with the host page's own title block. "
+                         "compact trims the theme's oversized heading band down "
+                         "to something the gallery sits under; keep leaves the "
+                         "theme alone; hide removes it entirely. Defaults to "
+                         "hide when --title is blank, compact otherwise.")
     ap.add_argument("--user-agent", metavar="STRING", default=USER_AGENT,
                     help="Override the User-Agent sent to Ghost. Only needed if a "
                          "CDN in front of your site is fussy about it.")
@@ -1883,8 +2142,13 @@ def main(argv=None) -> int:
         else:
             register_hearts(args, items)
 
+    page_title, title_size, title_note = resolve_title(args.title, args.title_size)
+    if title_note:
+        ps.log(f"Title:  {title_note}")
+
     gallery = build_gallery_html(items, tags_by_id, bleed=(args.width == "full"),
                                  max_width=args.max_width, col_width=args.column_width,
+                                 gap=args.gap, title_size=title_size,
                                  hearts_url=args.hearts_url or "")
     ps.log(f"Gallery: {len(gallery)/1024:.0f} KB of markup")
 
@@ -1900,9 +2164,15 @@ def main(argv=None) -> int:
                                            bleed=(args.width == "full"),
                                            max_width=args.max_width,
                                            col_width=args.column_width,
+                                           gap=args.gap,
+                                           title_size=title_size,
                                            hearts_url=args.hearts_url or "")
         dest.write_text(
             "<!doctype html><meta charset='utf-8'>"
+            # Ghost's own theme supplies this on the published page. The
+            # standalone preview needs its own, or a phone lays it out at 980px
+            # and the grid never reflows.
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
             "<title>Ghost gallery preview</title>"
             "<body style='margin:0;background:#111'>" + local_gallery,
             encoding="utf-8")
@@ -1917,10 +2187,10 @@ def main(argv=None) -> int:
     lexical = lexical_with_html_card(gallery)
     existing = client.find_page(args.slug)
     if existing:
-        page = client.update_page(existing, args.title, lexical, args.status)
+        page = client.update_page(existing, page_title, lexical, args.status)
         ps.log(f"Updated existing page /{page['slug']}/ ({page['status']})")
     else:
-        page = client.create_page(args.slug, args.title, lexical, args.status)
+        page = client.create_page(args.slug, page_title, lexical, args.status)
         ps.log(f"Created page /{page['slug']}/ ({page['status']})")
 
     ps.log(f"View: {args.site.rstrip('/')}/{page['slug']}/")

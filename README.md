@@ -480,6 +480,28 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
   itself when you open it (see section 7).
 - **`tags.json`** — your tags. Hand-authored, so `--reset` preserves it.
 
+### On a phone or tablet
+
+Both reports and the published page work the same way on a touchscreen:
+
+- **The `−` and `+` buttons resize the grid.** Pinching zooms the whole page,
+  which magnifies one column rather than showing more; these reflow it. Ten
+  steps from 100px to 620px columns, remembered per page in the browser. A
+  narrow screen starts two-up, and zooms out to three columns on a 390px phone —
+  the gutter tightens below 600px, which is what makes the third column fit.
+- **Swipe left or right in the lightbox** to move between photographs, or flick
+  sideways with two fingers on a trackpad. Only a decisively sideways gesture
+  counts — a mostly vertical one is someone scrolling — and one flick moves one
+  photograph however much momentum it carries. In the local report both are off
+  at 1:1, where dragging pans the photograph.
+- **The toolbar stays at the top** as you scroll, so the filters, sort and search
+  box stay reachable a thousand photographs down.
+- **Closing the lightbox leaves you on the photograph you were looking at**, not
+  the one you originally tapped.
+- On the published page, the lightbox has **its own heart** showing that
+  photograph's tally. Liking from either place updates both, and the sort key
+  behind "Most liked" with it.
+
 ### The lightbox
 
 Click any thumbnail — or its **view** link — and the photo opens full-window in an
@@ -516,15 +538,19 @@ Previews cost roughly 250 KB each — about 900 MB across 3,500 photographs. Low
 `PREVIEW_SIZE` to 1200 to roughly halve that, or pass `--no-previews` to skip them
 (the report still works; the overlay will say there's nothing to show).
 
-A feedback line reads like:
+Under each thumbnail is one short line — the two axis scores and what the subject
+matcher saw:
 
-> Strong aesthetic and clean execution (81/100 aesthetic, 74/100 technical); reads
-> as golden-hour mountain peaks, squarely on your primary subject.
+> Aesthetic 81 · Technical 74 · Golden-hour mountain peaks
 
-or
+If the photograph trips one of the quality checks, that is appended and coloured,
+since it is the only part of the line that is not on every card:
 
-> Weak aesthetic appeal (34/100 aesthetic, 12/100 technical); looks like a test
-> shot, not one of your target subjects; looks soft or out of focus.
+> Aesthetic 34 · Technical 12 · A test shot · **looks soft or out of focus**
+
+The verdict, the composite score and a video frame's timestamp are deliberately
+absent: they are already on the card, in the badge, the number beside it and the
+VIDEO chip. Restating them made every card read like every other one.
 
 ---
 
@@ -939,6 +965,32 @@ python photo_scout_ghost.py --site https://example.com --dry-run --emit-html pre
 
 If the key is wrong you will get `Admin API key must look like <id>:<hex secret>`
 before anything is uploaded — see [section 12](#12-troubleshooting).
+
+### Fitting the gallery to your theme
+
+The page is one self-contained block dropped into a normal Ghost page, so it
+inherits whatever spacing your theme gives its content. Three flags adjust the fit:
+
+| Flag | Effect |
+|---|---|
+| `--title "Best of 2011"` | Heading above the gallery. **Blank by default**, which also collapses the theme's heading band so the photographs start at the top of the page |
+| `--title-size compact` | What to do with your theme's own heading band. `compact` trims its padding and brings the title down to a sensible size; `keep` leaves the theme untouched; `hide` removes the heading entirely. Defaults to `hide` when `--title` is blank, `compact` otherwise |
+| `--gap 8` | Space above and below the gallery (default 8). Themes often set a large margin here — Ghost's own default is `max(12vmin, 64px)`, which is a visible hole on a tall screen. This replaces it. Negative values tuck the gallery up closer |
+| `--max-width 1800` | How wide the grid may grow, in pixels |
+| `--column-width 260` | Minimum column width; smaller means more columns |
+
+A page still needs a name in Ghost's admin list, so when `--title` is blank it is
+filed as **Photo Scout Gallery** — an empty title is not reliably accepted by the
+API and can land as "(Untitled)". Nothing on the page displays it; the heading is
+hidden. The run says which name it used, and `UNTITLED_GHOST_TITLE` at the top of
+the script changes it. Pass `--title-size` explicitly if you want the stand-in
+shown as a heading after all.
+
+Both spacing flags reach slightly outside the gallery itself, so they are scoped
+to pages that actually carry one: the script marks the document with a
+`psc-host` class and its rules are written against that. No other page on your
+site changes, and a theme whose heading uses class names the script does not
+recognise simply keeps its own spacing.
 
 `hearts/` is a small optional service that lets visitors "like" photographs on the
 published page, with the tallies stored in SQLite beside your site rather than

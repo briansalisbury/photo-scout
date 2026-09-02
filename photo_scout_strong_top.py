@@ -214,6 +214,21 @@ PHASH_HAMMING_THRESHOLD = 5
 BLUR_VARIANCE_FLOOR = 60.0
 BLUR_PENALTY = 18.0  # points subtracted from the composite
 
+# Faults worth naming on the card, as (wording, test, points off). Kept in one
+# place because the score, the note and the report's highlighting all need to
+# agree on which photographs trip which flag.
+DEFECT_RULES = (
+    ("looks soft or out of focus", lambda sharp, hi, lo: sharp < BLUR_VARIANCE_FLOOR,
+     BLUR_PENALTY),
+    ("highlights are blown", lambda sharp, hi, lo: hi > 0.12, 6.0),
+    ("large crushed-black areas", lambda sharp, hi, lo: lo > 0.35, 4.0),
+)
+DEFECT_TEXTS = tuple(t for t, _, _ in DEFECT_RULES)
+
+# Separates the facts on a card's feedback line. The report splits on it to pick
+# the defect out for highlighting, so it must not appear inside a fact.
+NOTE_SEP = " \u00b7 "
+
 # Each entry is (clip_prompt, short_label). The prompt is what CLIP compares the
 # image against; the short label is what appears in your report sentence.
 #
@@ -335,6 +350,9 @@ LAION_WEIGHTS_URL = (
     "https://github.com/christophschuhmann/improved-aesthetic-predictor/"
     "raw/main/sac%2Blogos%2Bava1-l14-linearMSE.pth"
 )
+# Linked from the report footer.
+PROJECT_URL = "https://github.com/briansalisbury/photo-scout/"
+
 CLIP_MODEL_ID = "openai/clip-vit-large-patch14"
 CLIP_EMBED_DIM = 768   # ViT-L/14 projection width; the LAION head's input size
 
@@ -478,6 +496,25 @@ def pretty_taken(stamp: Optional[str]) -> str:
     if date and time:
         return f"{date} · {time}"
     return date or ""
+
+
+def defects(sharpness: float, clip_hi: float, clip_lo: float) -> list[str]:
+    """Which quality flags a photograph trips, in order of seriousness."""
+    return [t for t, test, _ in DEFECT_RULES if test(sharpness, clip_hi, clip_lo)]
+
+
+def split_note(note: Optional[str]) -> tuple[str, str]:
+    """
+    Separate a feedback line into (facts, defect).
+
+    Matched against the known wordings rather than by splitting on the last
+    separator, so a subject label containing one cannot be mistaken for a fault.
+    """
+    note = note or ""
+    for text in DEFECT_TEXTS:
+        if note.endswith(NOTE_SEP + text):
+            return note[: -len(NOTE_SEP + text)], text
+    return note, ""
 
 
 def pretty_resolution(w: Optional[int], h: Optional[int]) -> str:
@@ -1223,46 +1260,27 @@ def compose(res: PhotoResult) -> None:
              + WEIGHT_TECHNICAL * tech
              + WEIGHT_SUBJECT * res.subject_score)
 
-    problems = []
-    if res.sharpness < BLUR_VARIANCE_FLOOR:
-        score -= BLUR_PENALTY
-        problems.append("looks soft or out of focus")
-    if res.clip_hi > 0.12:
-        score -= 6.0
-        problems.append("highlights are blown")
-    if res.clip_lo > 0.35:
-        score -= 4.0
-        problems.append("large crushed-black areas")
+    problems = defects(res.sharpness, res.clip_hi, res.clip_lo)
+    for text, _, penalty in DEFECT_RULES:
+        if text in problems:
+            score -= penalty
     if res.source_type == "video_frame":
         score -= VIDEO_FRAME_PENALTY
 
     res.composite = float(np.clip(score, 0.0, 100.0))
     res.verdict = verdict_for(res.composite)
 
-    # --- one-sentence feedback ------------------------------------------
+    # --- the line under the thumbnail -----------------------------------
+    # Two axis scores, what the subject matcher saw, and any defect. Nothing
+    # else: the verdict is already in the badge, the composite in the number
+    # beside it, and a frame's timestamp in the VIDEO badge, so restating them
+    # here just made every card read the same as every other one.
     label = res.subject_label or "no clear subject"
-    if res.subject_tier == "primary":
-        subj_clause = f"reads as {label}, squarely on your primary subject"
-    elif res.subject_tier == "secondary":
-        subj_clause = f"reads as {label} rather than a landscape, but that is still worth a look"
-    else:
-        subj_clause = f"looks like {label}, not one of your target subjects"
-
-    if res.verdict == "TOP PICK":
-        lead = "Strong aesthetic and clean execution"
-    elif res.verdict == "STRONG":
-        lead = "Good aesthetic with solid execution"
-    elif res.verdict == "MAYBE":
-        lead = "Middling aesthetic appeal"
-    else:
-        lead = "Weak aesthetic appeal"
-
-    tail = f"; {problems[0]}" if problems else ""
-    if res.source_type == "video_frame":
-        head = f"Video frame at {hhmmss(res.timestamp_s or 0)} - {lead[0].lower()}{lead[1:]}"
-    else:
-        head = lead
-    res.note = f"{head} ({aes:.0f}/100 aesthetic, {tech:.0f}/100 technical); {subj_clause}{tail}."
+    bits = [f"Aesthetic {aes:.0f}", f"Technical {tech:.0f}",
+            label[0].upper() + label[1:]]
+    if problems:
+        bits.append(problems[0])
+    res.note = NOTE_SEP.join(bits)
 
 
 # ---------------------------------------------------------------------------
@@ -2254,6 +2272,9 @@ def write_csv(rows, dest: Path, tags: Optional[dict] = None) -> None:
 # a SyntaxError in a future version).
 HTML_TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
+<!-- Without this a phone lays the page out at 980px and then shrinks it, so
+     the grid never reflows and every control is too small to hit. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Photo Scout - shortlist (top picks &amp; strong)</title>
 <style>
  :root { color-scheme: dark; }
@@ -2266,7 +2287,16 @@ HTML_TEMPLATE = r"""<!doctype html>
  button, select, input { background:#242424; color:#e8e8e8; border:1px solid #3a3a3a;
    border-radius:6px; padding:6px 11px; font-size:13px; cursor:pointer; }
  button.on { background:#2f6f4f; border-color:#3f8f68; }
- main { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; padding:18px; }
+ :root { --colw: 300px; }
+ main { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--colw),1fr)); gap:14px; padding:18px; }
+ /* On a phone the gutter, not the column width, is what keeps a third column
+    off the screen: three 115px columns need 361px at 8px, 373px at 14px. */
+ @media (max-width:600px) { main { gap:8px; padding:10px; } }
+ /* Thumbnail size. Ctrl+scroll zooms the whole page; these reflow the grid,
+    and give a touchscreen a way to do it at all. */
+ #zoom { display:inline-flex; gap:4px; }
+ #zoom button { min-width:34px; padding:6px 9px; font-size:15px; line-height:1; }
+ #zoom button[disabled] { opacity:.35; cursor:default; }
  .card { background:#1b1b1b; border:1px solid #2c2c2c; border-radius:10px; overflow:hidden;
    display:flex; flex-direction:column; }
  .card img { width:100%; aspect-ratio:3/2; object-fit:cover; background:#000; display:block; }
@@ -2282,23 +2312,18 @@ HTML_TEMPLATE = r"""<!doctype html>
  .PASS     { background:#3a3a3a; color:#a5a5a5; }
  .VIDEO    { background:#4a2a5c; color:#dcb0f5; margin-right:5px; }
  .note { color:#b6b6b6; font-size:12.5px; margin:6px 0 8px; }
- /* Two muted lines under the file name, split by how long each can get.
-    .folder holds one free-text field of unbounded length, so it takes the whole
-    line and truncates with an ellipsis; the full name is in its title
-    attribute. .specs holds facts of predictable width - date, time, pixel
-    dimensions, megapixels - and is allowed to WRAP rather than clip, so none of
-    them can ever be cut off.
-    Before this they shared a line, and a long folder name pushed the date and
-    resolution out of sight entirely. */
+ /* A named fault is the one part of the line that is not on every card, so it
+    is coloured to be scannable rather than read. */
+ .note .flag { color:#d9a441; }
+ /* Two muted lines, split by how long each field can get. The folder is
+    unbounded free text, so it takes a line to itself and truncates. The facts
+    below it wrap rather than clip, so none of them can be cut off. */
  .folder { color:#7d7d7d; font-size:11.5px; margin-bottom:2px;
    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
- /* tabular-nums lines the figures up down a column of cards, which is most of
-    what makes a grid of numbers look tidy. */
+ /* tabular-nums lines the figures up down a column of cards. */
  .specs { color:#6a6a6a; font-size:11px; margin-bottom:6px; line-height:1.45;
    font-variant-numeric:tabular-nums; }
- /* Each fact is atomic: a line break may fall between the date and the time,
-    or between the pixel dimensions and the megapixel figure, but never through
-    the middle of any one of them. A date split over two lines reads as a typo. */
+ /* Each fact is atomic - a break may fall between them, never inside one. */
  .specs span { white-space:nowrap; }
  .card .folder:empty, .card .specs:empty { display:none; }
  .links a { color:#7fc4ff; text-decoration:none; font-size:12px; margin-right:12px; }
@@ -2347,6 +2372,8 @@ HTML_TEMPLATE = r"""<!doctype html>
  .dup { opacity:.45; }
  .hidden { display:none !important; }
  footer { padding:24px; color:#777; font-size:12px; text-align:center; }
+ footer a { color:#9a9a9a; text-decoration:none; border-bottom:1px solid #3a3a3a; }
+ footer a:hover { color:#e8e8e8; border-bottom-color:#6a6a6a; }
  #toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
    background:#252525; border:1px solid #3d3d3d; color:#eee; padding:10px 16px;
    border-radius:8px; font-size:13px; opacity:0; pointer-events:none;
@@ -2368,9 +2395,8 @@ HTML_TEMPLATE = r"""<!doctype html>
    text-overflow:ellipsis; }
  #lb-sub { color:#9a9a9a; font-size:12px; white-space:nowrap; overflow:hidden;
    text-overflow:ellipsis; }
- /* Outside .grow and flex:none, so a long folder name in #lb-sub can never
-    squeeze the resolution out of the bar. This is the view where you decide
-    whether a frame is big enough to use, so it has to survive. */
+ /* Outside .grow and flex:none, so a long folder name in #lb-sub cannot
+    squeeze the resolution out of the bar. */
  #lb-dims { flex:none; color:#8a8a8a; font-size:12px; white-space:nowrap;
    font-variant-numeric:tabular-nums; }
  #lb-bar button, #lb-bar a { background:#242424; color:#e8e8e8; border:1px solid #3a3a3a;
@@ -2405,14 +2431,14 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button data-f="STRONG">Strong</button>
     <select id="folder" style="margin-left:10px;max-width:340px">__FOLDER_OPTIONS__</select>
     <select id="sort" title="Sort order">
-      <option value="score-desc">Rating, best first</option>
-      <option value="score-asc">Rating, worst first</option>
+      <option value="score-desc">Score, highest first</option>
+      <option value="score-asc">Score, lowest first</option>
       <option value="date-desc">Date, newest first</option>
       <option value="date-asc">Date, oldest first</option>
-      <option value="name-asc">File name A-Z</option>
-      <option value="name-desc">File name Z-A</option>
       <option value="folder-asc">Folder A-Z</option>
       <option value="folder-desc">Folder Z-A</option>
+      <option value="name-asc">File name A-Z</option>
+      <option value="name-desc">File name Z-A</option>
     </select>
     <select id="kind">
       <option value="all">Photos + video frames</option>
@@ -2420,6 +2446,12 @@ HTML_TEMPLATE = r"""<!doctype html>
       <option value="video">Video frames only</option>
     </select>
     <label><input type="checkbox" id="dups"> show near-duplicates</label>
+    <span id="zoom">
+      <button id="smaller" type="button" aria-label="Smaller thumbnails"
+              title="Smaller thumbnails, more per row">&minus;</button>
+      <button id="bigger" type="button" aria-label="Larger thumbnails"
+              title="Larger thumbnails, fewer per row">+</button>
+    </span>
     <div id="searchbox">
       <span id="chips"></span>
       <input type="search" id="q" autocomplete="off"
@@ -2460,11 +2492,39 @@ HTML_TEMPLATE = r"""<!doctype html>
 <main id="grid">
 __CARDS__
 </main>
-<footer>Generated by photo_scout.py &middot; scores are model estimates, not verdicts &mdash; trust your own eye on the shortlist.</footer>
+<footer>Generated by <a href="__PROJECT_URL__" target="_blank" rel="noopener">Photo Scout</a> &middot; scores are model estimates, not verdicts &mdash; trust your eye.&trade;</footer>
 <script>
  const grid = document.getElementById('grid');
  const qEl = document.getElementById('q');
  const cards = [...grid.children];
+
+ // ==== thumbnail size =======================================================
+ // Ctrl+scroll zooms the page, which magnifies one column rather than showing
+ // more. These reflow the grid, and are the only way to do it on a touchscreen.
+ (function zoom(){
+   const STEPS = [100, 115, 140, 160, 200, 240, 300, 380, 480, 620];
+   const smaller = document.getElementById('smaller');
+   const bigger = document.getElementById('bigger');
+   const KEY = 'psc-colw:' + location.pathname;
+   // One 300px column fills a phone, which is not a contact sheet. A narrow
+   // screen therefore starts two-up, and any saved choice still wins.
+   let at = STEPS.indexOf(innerWidth < 600 ? 160 : 300);
+   if (at < 0) at = STEPS.indexOf(300);
+   try {
+     const saved = STEPS.indexOf(parseInt(localStorage.getItem(KEY), 10));
+     if (saved >= 0) at = saved;
+   } catch (e) {}
+   function apply(){
+     document.documentElement.style.setProperty('--colw', STEPS[at] + 'px');
+     smaller.disabled = at === 0;
+     bigger.disabled = at === STEPS.length - 1;
+     try { localStorage.setItem(KEY, STEPS[at]); } catch (e) {}
+   }
+   smaller.addEventListener('click', () => { if (at > 0) { at--; apply(); } });
+   bigger.addEventListener('click', () => {
+     if (at < STEPS.length - 1) { at++; apply(); } });
+   apply();
+ })();
 
  // ==== tags =================================================================
  // State is { "<card key>": ["Lake Photos", ...] }, seeded from tags.json by the
@@ -2924,8 +2984,8 @@ __CARDS__
    document.getElementById('lb-sub').textContent =
      [c.dataset.folder, c.dataset.verdicttext + '  ' + c.dataset.score]
        .filter(Boolean).join('  ·  ');
-   // Resolution sits in its own slot rather than at the end of the subtitle,
-   // where a long folder name would push it past the ellipsis.
+   // Its own slot: at the end of the subtitle a long folder name would push
+   // it past the ellipsis.
    document.getElementById('lb-dims').textContent = c.dataset.res || '';
    document.getElementById('lb-note').textContent = c.dataset.note;
    document.getElementById('lb-count').textContent = (idx + 1) + '/' + list.length;
@@ -2938,9 +2998,49 @@ __CARDS__
      .forEach(n => { if (n && n.dataset.preview) new Image().src = n.dataset.preview; });
  }
  function close() {
+   // Leave the page on the photograph being looked at, not the one that was
+   // clicked several arrow presses ago.
+   const list = visible();
+   const c = idx >= 0 ? list[idx] : null;
    lb.classList.remove('open');
    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+   if (c) c.scrollIntoView({ block: 'center' });
  }
+
+ // A two-finger sideways flick on a trackpad arrives as wheel events carrying
+ // deltaX. Momentum fires dozens of them, so the accumulator locks after one
+ // step and only rearms once the flick has died down.
+ let wacc = 0, wlock = false, wtimer = null;
+ lb.addEventListener('wheel', e => {
+   if (!lb.classList.contains('open')) return;
+   if (stage.classList.contains('actual')) return;   // at 1:1 the stage pans
+   if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+   clearTimeout(wtimer);
+   wtimer = setTimeout(() => { wacc = 0; wlock = false; }, 240);
+   if (wlock) return;
+   wacc += e.deltaX;
+   if (Math.abs(wacc) < 60) return;
+   const dir = wacc < 0 ? -1 : 1;
+   wacc = 0; wlock = true;
+   show(idx + dir);
+ }, { passive: true });
+
+ // Swipe between photographs. Only a decisively sideways drag counts: a mostly
+ // vertical one is someone scrolling, and a short one is a tap that wandered.
+ // Skipped at 1:1, where dragging is how you pan around the photograph.
+ let tx = 0, ty = 0, tracking = false;
+ lb.addEventListener('touchstart', e => {
+   tracking = e.touches.length === 1 && !stage.classList.contains('actual');
+   if (tracking) { tx = e.touches[0].clientX; ty = e.touches[0].clientY; }
+ }, { passive: true });
+ lb.addEventListener('touchend', e => {
+   if (!tracking) return;
+   tracking = false;
+   const t = e.changedTouches[0];
+   const dx = t.clientX - tx, dy = t.clientY - ty;
+   if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+   show(idx + (dx < 0 ? 1 : -1));
+ }, { passive: true });
  function toggleZoom() {
    stage.classList.toggle('actual');
    document.getElementById('lb-zoom').textContent =
@@ -3023,14 +3123,17 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
         except (IndexError, KeyError):
             wpx = hpx = None
         res_txt = pretty_resolution(wpx, hpx)
-        # The folder gets a line to itself because it is the one field of
-        # unbounded length; the title attribute carries the full name for when
-        # the ellipsis hides some of it.
+        # The folder takes a line to itself, being the one field of unbounded
+        # length. Its title attribute carries the full name when it is elided.
         folder_html = (f'<div class="folder" title="{html.escape(folder_shown, quote=True)}">'
                        f'{html.escape(folder_shown)}</div>') if folder_shown else ""
-        # Date, time and resolution below it, each wrapped so a line break can
-        # fall between facts but never inside one.
+        # Date, time and resolution below it, each wrapped so a break can fall
+        # between facts but never inside one.
         atoms = spec_atoms(iso, wpx, hpx)
+        note_main, note_flag = split_note(r["note"])
+        note_html = html.escape(note_main) + (
+            f'{NOTE_SEP}<span class="flag">{html.escape(note_flag)}</span>'
+            if note_flag else "")
         specs_html = ('<div class="specs">'
                       + " &middot; ".join(f"<span>{html.escape(a)}</span>" for a in atoms)
                       + "</div>") if atoms else ""
@@ -3085,7 +3188,7 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
     </div>
     <div class="name">{html.escape(r['filename'])}{' &middot; near-dup' if is_dup else ''}</div>
     {folder_html}{specs_html}
-    <div class="note">{html.escape(r['note'] or '')}</div>
+    <div class="note">{note_html}</div>
     <div class="links">{links}</div>
     <div class="tagwrap"><div class="taglist">
       <input class="taginput" type="text" autocomplete="off" spellcheck="false"
@@ -3137,6 +3240,7 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
            .replace("__FOLDER_OPTIONS__", "\n".join(options))
            .replace("__TAGS_JSON__", json.dumps(payload, ensure_ascii=True))
            .replace("__STORAGE_KEY__", store_key)
+           .replace("__PROJECT_URL__", PROJECT_URL)
            )
     dest.write_text(out, encoding="utf-8")
 
