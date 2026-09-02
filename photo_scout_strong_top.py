@@ -2421,6 +2421,15 @@ HTML_TEMPLATE = r"""<!doctype html>
    display:none; }
  #lb.no-image #lb-img { display:none; }
  #lb.no-image #lb-missing { display:block; }
+
+ /* Last in the sheet on purpose: a media query carries no extra specificity,
+    so any of these declared later would win.
+    iOS Safari zooms the whole page when a text field smaller than 16px takes
+    focus, and there is no way to opt out without disabling pinch for everyone.
+    Touch pointers only, so the desktop bar stays compact. */
+ @media (pointer:coarse) {
+   input, select, #q, .taginput, .controls button, .controls select { font-size:16px; }
+ }
 </style>
 <header>
   <h1>Photo Scout &mdash; shortlist <span style="font-weight:400;color:#9a9a9a">(top picks &amp; strong only)</span></h1>

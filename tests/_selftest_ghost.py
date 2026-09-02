@@ -867,6 +867,121 @@ with sync_playwright() as pw:
     check("the page is left on the photograph last displayed, not the first",
           onscreen == "visible", f"{ended_on} is {onscreen}")
 
+    print("\n--- rotating a phone with the lightbox open")
+    # Filmed on an iPhone 13: rotating left the page zoomed in with no way back,
+    # because overflow:hidden is not a working scroll lock on iOS and there was
+    # nothing left to pan. The overlay must cover the viewport exactly in both
+    # orientations, and the way out must stay reachable.
+    mctx = br.new_context(viewport={"width": 390, "height": 844},
+                          is_mobile=True, has_touch=True)
+    M = mctx.new_page()
+    mobile_errors = []
+    M.on("pageerror", lambda e: mobile_errors.append(str(e)))
+    M.goto(page_path.resolve().as_uri()); M.wait_for_timeout(500)
+
+    check("a touch device gets 16px form fields, or iOS zooms the page on focus",
+          M.eval_on_selector(".psc-q", "e => getComputedStyle(e).fontSize") == "16px",
+          M.eval_on_selector(".psc-q", "e => getComputedStyle(e).fontSize"))
+
+    M.evaluate("window.scrollTo(0, 900)"); M.wait_for_timeout(250)
+    was = M.evaluate("window.scrollY")
+    M.evaluate("""() => {
+      const cards = [...document.querySelectorAll('.psc-card:not(.psc-hidden)')];
+      const vis = cards.find(c => {
+        const r = c.getBoundingClientRect();
+        return r.top > 0 && r.top < innerHeight - 100;
+      });
+      vis.querySelector('img').click();
+    }""")
+    M.wait_for_timeout(350)
+    check("the page behind is pinned, not merely overflow-hidden",
+          M.eval_on_selector("body", "e => getComputedStyle(e).position") == "fixed")
+    check("pinned at the offset it was left at",
+          M.eval_on_selector("body", "e => e.style.top") == f"-{was}px",
+          M.eval_on_selector("body", "e => e.style.top"))
+    # Both of these froze the layout viewport at the portrait width, which is
+    # what made iOS scale the page up from the top-left after a rotation.
+    check("the document is left free to relayout, not overflow-hidden",
+          M.eval_on_selector("html", "e => e.style.overflow") in ("", None),
+          M.eval_on_selector("html", "e => e.style.overflow"))
+    check("and the pinned body has no fixed width to freeze it either",
+          M.eval_on_selector("body", "e => e.style.width") in ("", None),
+          M.eval_on_selector("body", "e => e.style.width"))
+    check("it stretches by left/right instead",
+          M.eval_on_selector("body", "e => e.style.left") == "0px"
+          and M.eval_on_selector("body", "e => e.style.right") == "0px",
+          M.eval_on_selector("body", "e => [e.style.left, e.style.right]"))
+
+    for label, vp in (("landscape", {"width": 844, "height": 390}),
+                      ("portrait", {"width": 390, "height": 844})):
+        M.set_viewport_size(vp); M.wait_for_timeout(300)
+        box = M.eval_on_selector(".psc-lb", """e => {
+          const r = e.getBoundingClientRect();
+          return [Math.round(r.width), Math.round(r.height),
+                  Math.round(r.top), Math.round(r.left)];
+        }""")
+        check(f"in {label} the overlay covers the viewport exactly",
+              box == [vp["width"], vp["height"], 0, 0], str(box))
+        check(f"in {label} the photograph fits inside it",
+              M.eval_on_selector(".psc-lb img", """e => {
+                const r = e.getBoundingClientRect();
+                return r.width <= innerWidth + 1 && r.height <= innerHeight + 1;
+              }"""))
+        check(f"in {label} the body follows the new width",
+              M.eval_on_selector("body", "e => Math.round(e.getBoundingClientRect().width)")
+              == vp["width"],
+              M.eval_on_selector("body", "e => Math.round(e.getBoundingClientRect().width)"))
+        check(f"in {label} the way out is still on screen",
+              M.eval_on_selector(".psc-lb .x", """e => {
+                const r = e.getBoundingClientRect();
+                return r.top >= 0 && r.right <= innerWidth + 1 && r.width > 0;
+              }"""))
+    M.click(".psc-lb .x"); M.wait_for_timeout(350)
+
+    check("closing unpins the page",
+          M.eval_on_selector("body", "e => getComputedStyle(e).position") == "static")
+    check("and puts it back roughly where it was",
+          abs(M.evaluate("window.scrollY") - was) < 400,
+          f"{M.evaluate('window.scrollY')} vs {was}")
+
+    print("\n--- rotating on the grid, with a filter on")
+    # Reported on an iPhone 13: the zoom also happens with the lightbox CLOSED
+    # and Strong or Top picks pressed, so the watcher must cover the gallery as
+    # a whole, not only the overlay.
+    # Assert on the watcher's actual body, not on its name: renaming the
+    # function must not be able to make this pass.
+    _w = gal[gal.index("function watchRotation"):]
+    _w = _w[:_w.index("})();")]
+    check("a rotation watcher exists", "visualViewport" in _w and "resize" in _w)
+    check("and is not gated on the lightbox being open",
+          "lb.classList" not in _w and "contains('open')" not in _w, _w[:120])
+    check("it is registered unconditionally, at the top level",
+          "watchRotation" in gal.split("function openLb")[0])
+    check("a deliberate pinch is not undone by turning the phone",
+          "wasScale <= 1.01 && vv.scale > 1.01" in gal)
+    check("and it only acts on an actual orientation flip",
+          "nowPortrait !== wasPortrait" in gal)
+    for band in ("STRONG", "TOP PICK"):
+        M.click(f'.psc-bar button[data-band="{band}"]'); M.wait_for_timeout(250)
+        shown_now = M.eval_on_selector_all(".psc-card:not(.psc-hidden)", "e => e.length")
+        for vp in ({"width": 844, "height": 390}, {"width": 390, "height": 844}):
+            M.set_viewport_size(vp); M.wait_for_timeout(250)
+            check(f"{band} at {vp['width']}px: the page never overflows sideways",
+                  M.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),
+                  M.evaluate("[document.documentElement.scrollWidth, innerWidth]"))
+            check(f"{band} at {vp['width']}px: the gallery still fills the width",
+                  M.eval_on_selector(".psc-wrap",
+                      "e => e.getBoundingClientRect().width >= innerWidth * 0.9"),
+                  M.eval_on_selector(".psc-wrap",
+                      "e => [Math.round(e.getBoundingClientRect().width), innerWidth]"))
+        check(f"{band} survived the rotations with its cards intact",
+              M.eval_on_selector_all(".psc-card:not(.psc-hidden)", "e => e.length")
+              == shown_now, str(shown_now))
+    M.click('.psc-bar button[data-band="all"]'); M.wait_for_timeout(200)
+
+    check("no errors on a phone", not mobile_errors, str(mobile_errors[:2]))
+    mctx.close()
+
     print("\n--- the footer")
     foot = P.eval_on_selector(".psc-foot", "e => e.textContent")
     check("the page credits Photo Scout", "Generated by Photo Scout" in foot, foot)

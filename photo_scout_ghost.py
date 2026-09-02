@@ -737,12 +737,12 @@ __HEADCSS__
    gap in the row while the counts are still on their way. */
 .psc-bar .psc-likedonly.psc-pending{display:none}
 .psc-hidden{display:none!important}
-.psc-lb{position:fixed;inset:0;width:100%;height:100%;overscroll-behavior:contain;
-  touch-action:none;
+.psc-lb{position:fixed;inset:0;width:100%;height:100vh;height:100dvh;
+  overscroll-behavior:contain;touch-action:none;
   background:rgba(0,0,0,.94);z-index:2147483000;display:none;
   align-items:center;justify-content:center}
 .psc-lb.open{display:flex}
-.psc-lb img{max-width:96vw;max-height:92vh;object-fit:contain}
+.psc-lb img{max-width:96vw;max-height:92vh;max-height:92dvh;object-fit:contain}
 .psc-lb .x{position:absolute;top:14px;right:20px;color:#ddd;font-size:30px;cursor:pointer;
   background:none;border:none;z-index:2}
 .psc-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.45);
@@ -771,6 +771,14 @@ __HEADCSS__
   font-variant-numeric:tabular-nums}
 @media (max-width:600px){.psc-nav{width:44px;height:64px;font-size:22px}
   .psc-prev{left:6px} .psc-next{right:6px} .psc-cap{max-width:50vw}}
+
+/* iOS Safari zooms the entire page when a text field smaller than 16px takes
+   focus, and there is no way to ask it not to without disabling pinch for the
+   whole site. Sizing the field up is the only fix that does not cost the
+   visitor something. Touch pointers only, so the desktop bar stays compact. */
+@media (pointer:coarse){
+  .psc-bar input,.psc-bar select,.psc-bar .psc-q{font-size:16px}
+}
 
 /* Narrow screens. These must come after the rules they override: a media query
    carries no extra specificity, so a base rule declared later would win. */
@@ -1543,19 +1551,69 @@ GALLERY_JS = r"""
   }
 
   var lockPrev = null;
+  // Pinning the body at its current offset stops the page moving behind the
+  // overlay. Two details matter on iOS, and both are about ROTATION:
+  //
+  //  * no overflow:hidden on <html>. That freezes the layout viewport at the
+  //    portrait width; Safari then finds a 390px page in an 844px window after
+  //    a rotation and scales up from the top-left to fill it. The fixed body
+  //    alone already leaves nothing to scroll.
+  //  * left/right rather than width. The body has to be free to stretch to the
+  //    new width, and a fixed width is the same freeze by another route.
   function setScrollLock(on){
-    var de = document.documentElement, bd = document.body;
+    var bd = document.body;
     if (on) {
       if (lockPrev) return;
-      lockPrev = {de: de.style.overflow, bd: bd.style.overflow};
-      de.style.overflow = 'hidden';
-      bd.style.overflow = 'hidden';
+      var y = window.scrollY || document.documentElement.scrollTop || 0;
+      lockPrev = {y: y, position: bd.style.position, top: bd.style.top,
+                  left: bd.style.left, right: bd.style.right};
+      bd.style.position = 'fixed';
+      bd.style.top = (-y) + 'px';
+      bd.style.left = '0';
+      bd.style.right = '0';
     } else if (lockPrev) {
-      de.style.overflow = lockPrev.de;
-      bd.style.overflow = lockPrev.bd;
+      bd.style.position = lockPrev.position;
+      bd.style.top = lockPrev.top;
+      bd.style.left = lockPrev.left;
+      bd.style.right = lockPrev.right;
+      window.scrollTo(0, lockPrev.y);
       lockPrev = null;
     }
   }
+
+  // iOS Safari sometimes rescales the whole page when the device is rotated,
+  // anchored at the top-left. It shows up most on a short page - one of the
+  // filter buttons pressed, so there are only a couple of rows - and it is not
+  // confined to the lightbox, so this watches the gallery as a whole.
+  //
+  // Briefly pinning maximum-scale forces Safari back to 1; the tag is restored
+  // a moment later so pinch-to-zoom keeps working everywhere on the site.
+  function unzoom(){
+    var meta = document.querySelector('meta[name="viewport"]');
+    if (!meta) return;
+    var was = meta.getAttribute('content');
+    if (/maximum-scale/.test(was)) return;      // the site already pins it
+    meta.setAttribute('content', was + ',maximum-scale=1');
+    setTimeout(function(){ meta.setAttribute('content', was); }, 350);
+  }
+
+  // Only a rotation that ZOOMED counts. Somebody who pinched in deliberately
+  // and then turned the phone keeps their zoom: the correction fires when the
+  // scale was 1 before the turn and is not 1 after it.
+  (function watchRotation(){
+    var vv = window.visualViewport;
+    if (!vv) return;
+    var wasScale = vv.scale, wasPortrait = vv.height >= vv.width;
+    vv.addEventListener('resize', function(){
+      var nowPortrait = vv.height >= vv.width;
+      var turned = nowPortrait !== wasPortrait;
+      if (turned && wasScale <= 1.01 && vv.scale > 1.01) unzoom();
+      // Read after the correction is queued: the next resize compares against
+      // where this one left off.
+      wasPortrait = nowPortrait;
+      wasScale = vv.scale;
+    });
+  })();
   function openLb(i){
     order = visibleIdx();
     cur = order.indexOf(i);

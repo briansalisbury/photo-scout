@@ -274,7 +274,10 @@ for opt in ("score-desc", "date-asc", "name-asc", "folder-asc"):
 print("\n=== in a browser ===")
 from playwright.sync_api import sync_playwright
 with sync_playwright() as pw:
-    b = pw.chromium.launch(); P = b.new_page()
+    # has_touch makes Chromium report pointer:coarse, which is what the 16px
+    # form-field rule keys off - the rule that stops iOS zooming on focus.
+    b = pw.chromium.launch()
+    P = b.new_context(has_touch=True).new_page()
     P.set_viewport_size({"width": 1500, "height": 950})
     P.goto((OUT / "report.html").resolve().as_uri()); P.wait_for_timeout(500)
 
@@ -494,6 +497,10 @@ with sync_playwright() as pw:
           }"""))
     P.evaluate("window.scrollTo(0, 0)")
     P.set_viewport_size({"width": 1500, "height": 950}); P.wait_for_timeout(250)
+
+    check("a touch device gets 16px form fields, or iOS zooms the page on focus",
+          P.eval_on_selector("#q", "e => getComputedStyle(e).fontSize") == "16px",
+          P.eval_on_selector("#q", "e => getComputedStyle(e).fontSize"))
 
     print("\n--- a trackpad flick pages the lightbox")
     def flick(dx, dy=0, n=6):

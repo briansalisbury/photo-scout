@@ -478,8 +478,7 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
   subfolder per clip. Only created if the library contains video (see section 8).
 - **`calibration.json`** — the score scale fitted to this library. The file explains
   itself when you open it (see section 7). Written automatically and specific to
-  your photographs, so it is not worth committing; `calibration.example.json` in
-  the repository root shows its shape.
+  your photographs, so it is not worth committing.
 - **`tags.json`** — your tags. Hand-authored, so `--reset` preserves it.
 
 ### On a phone or tablet
@@ -498,6 +497,13 @@ Both reports and the published page work the same way on a touchscreen:
   at 1:1, where dragging pans the photograph.
 - **The toolbar stays at the top** as you scroll, so the filters, sort and search
   box stay reachable a thousand photographs down.
+- **Form fields are 16px on touch devices.** Below that, iOS Safari zooms the
+  whole page the moment one takes focus, and there is no way to opt out short of
+  disabling pinch for every visitor.
+- **The lightbox pins the page rather than hiding its overflow.** `overflow:
+  hidden` is the obvious scroll lock and the wrong one on iOS: it does not
+  reliably hold, and rotating the device with it set can leave the page zoomed in
+  with nothing left to pan back.
 - **Closing the lightbox leaves you on the photograph you were looking at**, not
   the one you originally tapped.
 - On the published page, the lightbox has **its own heart** showing that
@@ -610,8 +616,7 @@ Change the proportions by editing `BAND_QUANTILES` in the script and re-running
 `--calibrate`. Delete `calibration.json` to return to the defaults.
 
 The file is generated, never hand-written, and describes one library — so it is
-git-ignored rather than shipped. `calibration.example.json` in the repository
-root shows the shape, carrying the shipped defaults.
+git-ignored rather than shipped.
 
 Calibration **rescales, it does not reorder** — your best photograph is the same
 photograph before and after. What changes is where the lines fall.
