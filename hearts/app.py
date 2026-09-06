@@ -70,7 +70,23 @@ TOKEN_OK = re.compile(r"^[A-Za-z0-9-]{16,64}$")
 
 SCHEMA_VERSION = 1
 
+# The largest body worth reading. The allowlist for a library of a few thousand
+# photographs is well under this; a visitor's heart carries no body at all. The
+# shipped proxy configs cap it too, but this is the layer that holds if the
+# service is ever reached directly.
+MAX_BODY = int(os.environ.get("HEARTS_MAX_BODY", str(2 * 1024 * 1024)))
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_BODY
+
+
+@app.after_request
+def _harden(resp):
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    # Nothing here is meant to be framed, and no request from this service ever
+    # needs to carry where it came from.
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -374,12 +390,21 @@ def health():
         db().execute("SELECT 1").fetchone()
         return jsonify({"ok": True, "schema_version": SCHEMA_VERSION})
     except sqlite3.Error as exc:
-        return err(f"database unavailable: {exc}", 503)
+        return _db_error(exc)
 
 
 @app.errorhandler(sqlite3.Error)
 def _db_error(exc):
-    return err(f"database unavailable: {exc}", 503)
+    # The detail goes to the log, where the operator can read it, and not to the
+    # caller: sqlite messages can name paths and table structure, and a stranger
+    # clicking a heart has no use for either.
+    print(f"hearts: database error: {exc}", flush=True)
+    return err("database unavailable", 503)
+
+
+@app.errorhandler(413)
+def _too_large(_exc):
+    return err("request body too large", 413)
 
 
 def _explain_data_dir(exc: Exception) -> None:
@@ -423,7 +448,9 @@ if __name__ == "__main__":
     try:
         from waitress import serve
         print(f"hearts: serving on 0.0.0.0:{PORT} (db {DB_PATH})", flush=True)
-        serve(app, host="0.0.0.0", port=PORT, threads=THREADS,
+        # 0.0.0.0 inside the container is correct: compose publishes the
+        # port on 127.0.0.1 only, so nothing outside the host can reach it.
+        serve(app, host="0.0.0.0", port=PORT, threads=THREADS,  # nosec B104
               # Keep the accept queue short: on one core, a backlog that grows
               # without bound turns a traffic spike into swap pressure for
               # Ghost. Refusing fast is kinder than queueing slowly.

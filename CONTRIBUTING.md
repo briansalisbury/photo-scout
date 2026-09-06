@@ -2,7 +2,7 @@
 
 Contributions are welcome: patches, documentation, and bug reports alike.
 
-Field reports are particularly valuable. Photo Scout is exercised by fourteen test
+Field reports are particularly valuable. Photo Scout is exercised by fifteen test
 suites, but a test library is a model of a real one, and models have edges. RAW
 files from a camera the project has not met, a folder structure nobody anticipated,
 an archive an order of magnitude larger than the ones it was built against — those
@@ -93,12 +93,44 @@ for t in tests/_selftest*.py; do python "$t" >/dev/null 2>&1 \
 | `_selftest_ghost.py` | The Ghost publisher against a mock Admin API |
 | `_selftest_hearts.py` | The heart service: API, abuse handling, persistence |
 | `_selftest_hearts_browser.py` | Heart buttons in a browser, including with the service down |
+| `_selftest_security.py` | Script-block escaping, the plaintext-HTTP refusal, heart service limits |
 
 The browser suites are the slowest. They are also the ones that have caught the most.
 
 The leading underscore keeps pytest from collecting them: they execute at import
 rather than defining test functions, so a bare `pytest` run would do something
 surprising.
+
+---
+
+## Security
+
+Found a vulnerability? Do not open a public issue. SECURITY.md says what is in
+scope and where to send it.
+
+`.github/workflows/ci.yml` runs Ruff, Bandit, `pip-audit` and every test suite on
+each push, plus `pip-audit` weekly so a newly published advisory still turns up.
+Run them locally before opening a pull request:
+
+```bash
+pip install ruff bandit pip-audit
+ruff check --select E9,F63,F7,F82 .
+bandit -r . -x ./tests --skip B101,B404,B603,B607
+pip-audit --strict -r requirements.txt
+```
+
+Where a Bandit finding is a false positive, the line carries `# nosec BXXX` with
+the reason above it. Add one only when you can write that reason honestly.
+
+Two rules for patches:
+
+- **Anything that reaches a browser gets escaped.** File names, folder names and
+  tags all originate outside the program. Markup goes through `html.escape`;
+  data embedded in a `<script>` block goes through `script_json`; the JavaScript
+  sets `textContent`, never `innerHTML`.
+- **A credential never travels in the clear and never lands in a log.** The
+  Admin API key and the heart admin token come from the environment or a flag,
+  and only the length of a key is ever printed.
 
 ---
 

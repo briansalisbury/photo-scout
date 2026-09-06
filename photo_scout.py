@@ -337,10 +337,37 @@ LAION_WEIGHTS_URL = (
     "https://github.com/christophschuhmann/improved-aesthetic-predictor/"
     "raw/main/sac%2Blogos%2Bava1-l14-linearMSE.pth"
 )
+# The checkpoint is the one file this script fetches from the internet, and a
+# checkpoint is not inert data - it is loaded into a model. Pinning the digest
+# means a compromised host, a hijacked repository or a proxy rewriting the
+# response is caught before torch reads a byte of it.
+#
+# Confirmed against two mirrors that carry the same upstream file:
+# huggingface.co/spaces/Geonmo/laion-aesthetic-predictor and
+# huggingface.co/chaofengc/IQA-PyTorch-Weights.
+#
+# The URL still points at the branch rather than a commit. That is deliberate:
+# once the bytes are checked, a mutable URL cannot deliver anything unexpected -
+# it can only stop working, which is loud rather than dangerous.
+#
+# If upstream ever republishes the file, this needs updating. Set
+# PHOTO_SCOUT_LAION_SHA256 to work around it in the meantime; nobody should be
+# stuck because a constant in here went stale.
+LAION_WEIGHTS_SHA256 = "21dd590f3ccdc646f0d53120778b296013b096a035a2718c9cb0d511bff0f1e0"
+# A ceiling on the download, so a redirect to something enormous cannot fill the
+# disk before the digest gets a chance to reject it. The real file is under 4 MB.
+LAION_WEIGHTS_MAX_BYTES = 64 * 1024 * 1024
+# https for the real thing; file for the test suite, which verifies the
+# checksum machinery without going near a network.
+DOWNLOAD_SCHEMES = ("https", "file")
 # Linked from the report footer.
 PROJECT_URL = "https://github.com/briansalisbury/photo-scout/"
 
 CLIP_MODEL_ID = "openai/clip-vit-large-patch14"
+# The exact commit in that repository. Unchanged upstream since 2023, so
+# pinning it costs nothing and closes the door on the repository changing
+# under a future run.
+CLIP_MODEL_REVISION = "32bd64288804d66eefd0ccbe215aa642df71cc41"
 CLIP_EMBED_DIM = 768   # ViT-L/14 projection width; the LAION head's input size
 
 
@@ -350,6 +377,66 @@ CLIP_EMBED_DIM = 768   # ViT-L/14 projection width; the LAION head's input size
 
 def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def sha256_file(path: Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+class ChecksumMismatch(RuntimeError):
+    pass
+
+
+def download_verified(url: str, dest: Path, expected_sha256: str,
+                      max_bytes: int, timeout: int = 120) -> None:
+    """
+    Fetch a file and refuse to keep it unless its digest matches.
+
+    Written to a temporary name first, so a failed or tampered download can
+    never be left behind looking like a good one. Nothing lands at `dest` that
+    has not already been verified.
+    """
+    import urllib.request
+
+    scheme = urllib.parse.urlsplit(url).scheme
+    if scheme not in DOWNLOAD_SCHEMES:
+        raise ValueError(f"refusing to download over {scheme!r}")
+
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    tmp.unlink(missing_ok=True)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "photo-scout"})
+        # The scheme was checked above, which is what B310 asks for.
+        resp = urllib.request.urlopen(req, timeout=timeout)  # nosec B310
+        with resp, open(tmp, "wb") as out:
+            written = 0
+            while True:
+                block = resp.read(1 << 16)
+                if not block:
+                    break
+                written += len(block)
+                if written > max_bytes:
+                    raise ChecksumMismatch(
+                        f"{url} is larger than the {max_bytes} byte ceiling - "
+                        f"this is not the file it should be.")
+                out.write(block)
+        got = sha256_file(tmp)
+        if got != expected_sha256:
+            raise ChecksumMismatch(
+                f"Checksum mismatch on {url}\n"
+                f"  expected {expected_sha256}\n"
+                f"  got      {got}\n"
+                f"The file was discarded. Either the download was corrupted, or "
+                f"what is being served is not what this script was written "
+                f"against. If upstream has legitimately republished it, set "
+                f"PHOTO_SCOUT_LAION_SHA256 to the new digest.")
+        tmp.replace(dest)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def rescale(value: float, lo: float, hi: float) -> float:
@@ -700,7 +787,8 @@ def load_image(path: Path, max_edge: int = SCORING_SIZE) -> Image.Image:
         from PIL import ImageOps
         img = ImageOps.exif_transpose(img)
     except Exception:
-        pass
+        # A broken Orientation tag is not worth failing an image over.
+        pass  # nosec B110
 
     # Captured BEFORE the downscale below, because after it every image is the
     # same size and the file's real resolution is gone. It is reported beside
@@ -1079,8 +1167,15 @@ class Scorer:
                 log("  your NVIDIA driver with `nvidia-smi`. Running on CPU for now.")
 
         log(f"Loading CLIP: {CLIP_MODEL_ID}")
-        self.clip = CLIPModel.from_pretrained(CLIP_MODEL_ID).to(self.device).eval()
-        self.clip_proc = CLIPProcessor.from_pretrained(CLIP_MODEL_ID)
+        # Pinned to a revision rather than tracking the branch. A model
+        # repository is mutable, and a config file in one can change how
+        # loading behaves - so the version this was tested against is the
+        # version it loads. Hugging Face caches by revision, so an existing
+        # cache is reused rather than re-downloaded.
+        self.clip = CLIPModel.from_pretrained(
+            CLIP_MODEL_ID, revision=CLIP_MODEL_REVISION).to(self.device).eval()
+        self.clip_proc = CLIPProcessor.from_pretrained(
+            CLIP_MODEL_ID, revision=CLIP_MODEL_REVISION)
 
         self.aesthetic_head = self._load_laion_head(cache_dir)
         self.nima = self._load_nima() if use_nima else None
@@ -1112,10 +1207,20 @@ class Scorer:
         cache_dir.mkdir(parents=True, exist_ok=True)
         weights_path = cache_dir / "laion_aesthetic_l14_linearMSE.pth"
 
+        want = os.environ.get("PHOTO_SCOUT_LAION_SHA256") or LAION_WEIGHTS_SHA256
+
+        # A copy cached before this check existed is unverified, so it gets the
+        # same treatment as a fresh one: check it, and fetch again if it fails.
+        # The second failure is the one worth listening to.
+        if weights_path.exists() and sha256_file(weights_path) != want:
+            log("The cached LAION-Aesthetic weights do not match their expected "
+                "checksum - discarding and fetching again")
+            weights_path.unlink()
+
         if not weights_path.exists():
-            log("Downloading LAION-Aesthetic weights (~15 MB, one time)")
-            import urllib.request
-            urllib.request.urlretrieve(LAION_WEIGHTS_URL, weights_path)
+            log("Downloading LAION-Aesthetic weights (~4 MB, one time)")
+            download_verified(LAION_WEIGHTS_URL, weights_path, want,
+                              LAION_WEIGHTS_MAX_BYTES)
 
         head = nn.Sequential(
             nn.Linear(768, 1024), nn.Dropout(0.2),
@@ -1822,7 +1927,8 @@ def make_preview(img: Image.Image, dest: Path) -> None:
 
 def thumb_name(path) -> str:
     """Stable thumbnail filename. Accepts a real path or a virtual frame path."""
-    return hashlib.sha1(str(path).encode("utf-8")).hexdigest()[:20] + ".jpg"
+    return hashlib.sha1(str(path).encode("utf-8"),
+                        usedforsecurity=False).hexdigest()[:20] + ".jpg"
 
 
 def _score_one(img: Image.Image, res: PhotoResult, scorer, out_dir: Path,
@@ -3094,6 +3200,25 @@ def top_folder(folder: Optional[str]) -> str:
     return re.split(r"[\\/]", folder or "(root)")[0] or "(root)"
 
 
+def script_json(obj, ensure_ascii: bool = True) -> str:
+    """
+    JSON safe to drop inside a <script> block.
+
+    An HTML parser stops reading a script at the first `</`, and `<!--` puts it
+    into a state where a later `<script` changes where it stops. Neither
+    sequence can appear in valid JSON except inside a string, and both survive
+    the escaping as the same string, so this is a rewrite rather than a
+    restriction on the data.
+
+    It matters because the strings here are file names, folder names and tag
+    keys. `<` and `>` are legal in a filename on Linux and macOS, and tags.json
+    is an editable file on disk, so neither can be assumed harmless.
+    """
+    return (json.dumps(obj, separators=(",", ":"), ensure_ascii=ensure_ascii)
+            .replace("</", "<\\/")
+            .replace("<!--", "<\\u0021--"))
+
+
 def write_html(rows, dest: Path, root: Path, stats: dict,
                tags: Optional[dict] = None) -> None:
     tags = tags or {}
@@ -3225,9 +3350,8 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
                        f'{html.escape(strip_folder_date(name))} ({tops[name]})</option>')
 
     # Only tags for images actually in this report, so the shortlist variant
-    # doesn't ship the whole library's tags. json.dumps escapes for JS, and the
-    # allowed character set already rules out anything that could break out of
-    # the script block.
+    # doesn't ship the whole library's tags. Tag values are sanitised on the way
+    # in; the keys are file paths and are not, so script_json does the escaping.
     keys = {r["path"] for r in rows}
     payload = {k: v for k, v in tags.items() if k in keys}
 
@@ -3235,13 +3359,14 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
     # file:// page as one origin, so without this the full report and the
     # shortlist report would fight over the same localStorage entry.
     store_key = "photo_scout_tags_" + hashlib.sha1(
-        str(dest.resolve()).encode("utf-8")).hexdigest()[:16]
+        str(dest.resolve()).encode("utf-8"),
+        usedforsecurity=False).hexdigest()[:16]
 
     out = (HTML_TEMPLATE
            .replace("__CARDS__", "\n".join(cards))
            .replace("__STATS__", stats_html)
            .replace("__FOLDER_OPTIONS__", "\n".join(options))
-           .replace("__TAGS_JSON__", json.dumps(payload, ensure_ascii=True))
+           .replace("__TAGS_JSON__", script_json(payload))
            .replace("__STORAGE_KEY__", store_key)
            .replace("__PROJECT_URL__", PROJECT_URL)
            )
@@ -3412,7 +3537,8 @@ def run_reset(root: Path, out_dir: Path, assume_yes: bool) -> bool:
             scored = conn.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
             conn.close()
         except Exception:
-            pass
+            # This feeds a summary line. No count is a fine answer.
+            pass  # nosec B110
     for sub, name in ((out_dir / "thumbs", "thumbs"), (out_dir / "previews", "previews"),
                       (out_dir / "extracted_stills", "stills")):
         if sub.exists():

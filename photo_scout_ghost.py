@@ -221,6 +221,24 @@ def ghost_jwt(admin_key: str) -> str:
     return signing_input.decode("ascii") + "." + _b64url(signature)
 
 
+LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def plaintext_endpoint(url: str) -> bool:
+    """
+    True when this URL would put a credential on the wire in the clear.
+
+    Loopback is exempt: a tunnel to a Ghost on your own machine is a normal way
+    to work, and nothing leaves the host. Everything else over http:// means the
+    Admin API key, or the heart admin token, is readable by anything between
+    here and the server - and an Admin key is full write access to the site.
+    """
+    parsed = urllib.parse.urlsplit(url if "://" in url else "https://" + url)
+    if parsed.scheme != "http":
+        return False
+    return (parsed.hostname or "").lower() not in LOOPBACK_HOSTS
+
+
 class GhostError(RuntimeError):
     pass
 
@@ -302,7 +320,7 @@ class GhostClient:
         if content_type:
             req.add_header("Content-Type", content_type)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:  # nosec B310
                 body = resp.read()
         except urllib.error.HTTPError as exc:
             if exc.code == 404 and allow_404:
@@ -319,7 +337,10 @@ class GhostClient:
     # -- images ------------------------------------------------------------
     def upload_image(self, local: Path, filename: str, ref: str) -> str:
         """Upload one image, returning the absolute URL Ghost assigned it."""
-        boundary = "----psc" + hashlib.sha1(os.urandom(16)).hexdigest()
+        # A multipart boundary only has to be unique, so the digest is a
+        # formatting device; the randomness comes from os.urandom.
+        boundary = "----psc" + hashlib.sha1(
+            os.urandom(16), usedforsecurity=False).hexdigest()
         mime = mimetypes.guess_type(filename)[0] or "image/jpeg"
 
         parts: list[bytes] = []
@@ -455,13 +476,12 @@ def load_shortlist(scores_db: Path, out_dir: Path, root: Path) -> list[dict]:
     uri = f"file:{urllib.parse.quote(str(scores_db))}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
+    # One placeholder per verdict. The only thing interpolated is the count
+    # of question marks; the values themselves are bound.
     placeholders = ",".join("?" for _ in PUBLISH_VERDICTS)
-    rows = conn.execute(
-        f"""SELECT * FROM photos
-            WHERE error IS NULL AND dup_of IS NULL AND verdict IN ({placeholders})
-            ORDER BY composite DESC""",
-        PUBLISH_VERDICTS,
-    ).fetchall()
+    sql = ("SELECT * FROM photos WHERE error IS NULL AND dup_of IS NULL "  # nosec B608
+           f"AND verdict IN ({placeholders}) ORDER BY composite DESC")
+    rows = conn.execute(sql, PUBLISH_VERDICTS).fetchall()
     conn.close()
 
     items = []
@@ -1747,9 +1767,7 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
             entry["t"] = tl
         payload.append(entry)
 
-    data_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-    # </script> inside a script block would terminate it early.
-    data_json = data_json.replace("</", "<\\/")
+    data_json = ps.script_json(payload, ensure_ascii=False)
 
     top = sum(1 for i in items if i["verdict"] == "TOP PICK")
     strong = sum(1 for i in items if i["verdict"] == "STRONG")
@@ -1983,7 +2001,7 @@ def register_hearts(args, items: list[dict]) -> None:
         "User-Agent": args.user_agent,
     })
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
             out = json.loads(resp.read().decode())
         ps.log(f"Hearts: {out.get('registered', 0)} photographs registered, "
                f"{out.get('known_photos', '?')} known to the service")
@@ -2072,6 +2090,9 @@ def main(argv=None) -> int:
                     help="Admin token for the heart service, so this script can "
                          "register which photographs may be hearted. Or set "
                          "HEARTS_ADMIN_TOKEN.")
+    ap.add_argument("--insecure-http", action="store_true",
+                    help="Allow a plain http:// site or heart endpoint. Off by "
+                         "default: it sends the Admin API key in the clear.")
     ap.add_argument("--limit", type=int, help="Only publish the top N photographs")
     ap.add_argument("--dry-run", action="store_true",
                     help="Build everything and write the HTML locally, but upload "
@@ -2124,6 +2145,31 @@ def main(argv=None) -> int:
             return 2
 
     admin_url = (args.admin_url or args.site).rstrip("/")
+
+    # Refuse before anything is sent, not after. Both of these carry a
+    # credential that grants write access.
+    unsafe = []
+    if not args.dry_run and not args.hearts_register_only \
+            and plaintext_endpoint(admin_url):
+        unsafe.append(("the Ghost Admin API key", admin_url))
+    hearts_base = args.hearts_url
+    if hearts_base.startswith("/"):
+        hearts_base = args.site.rstrip("/") + hearts_base
+    if hearts_base and (args.hearts_token or os.environ.get("HEARTS_ADMIN_TOKEN")) \
+            and plaintext_endpoint(hearts_base):
+        unsafe.append(("the heart admin token", hearts_base))
+    if unsafe and not args.insecure_http:
+        for what, where in unsafe:
+            ps.log(f"ERROR: {where} is plain http, and publishing would send "
+                   f"{what} over it in the clear.")
+        ps.log("       Use https, or --insecure-http if you are certain the "
+               "network in between is yours.")
+        return 2
+    if unsafe:
+        for _, where in unsafe:
+            ps.log(f"WARNING: sending a credential in the clear to {where} "
+                   "(--insecure-http)")
+
     ps.log(f"Site:   {args.site}")
     if admin_url != args.site.rstrip("/"):
         ps.log(f"Admin:  {admin_url}")

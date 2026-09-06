@@ -292,6 +292,31 @@ pip install -r requirements.txt
 the NIMA technical model and is optional — if it will not install, pass `--no-nima`
 and the script degrades gracefully to two axes.
 
+**The version floors are security floors.** Each is the lowest release with no
+known advisory against it — this tool spends its life opening files it did not
+create, so the decoders are worth keeping current. Two of them will move an
+existing install:
+
+- **transformers 5.x.** If you are on 4.x this is a major-version upgrade.
+  Photo Scout runs on both, but 5.10 is the first release clear of open
+  advisories, so that is the floor.
+- **torch 2.13.** Reinstall it with the CUDA index URL above, not a bare
+  `pip install --upgrade torch`, or you will quietly land on the CPU build.
+
+Check the state of your own environment at any time:
+
+```bash
+pip install pip-audit && pip-audit
+```
+
+**The models are pinned.** CLIP is loaded from an exact commit rather than
+whichever revision the repository happens to be serving, and the LAION-Aesthetic
+checkpoint is verified against a SHA-256 before it is loaded — a checkpoint is
+executed by the framework, not merely read. A mismatch stops the run and says
+so. Both pins are constants at the top of `photo_scout.py`; if upstream ever
+republishes the checkpoint legitimately, `PHOTO_SCOUT_LAION_SHA256` overrides the
+digest without editing the script.
+
 On Windows, prefer python.org over the Microsoft Store build: the Store version is
 sandboxed and causes odd file-permission behaviour with large libraries.
 
@@ -989,6 +1014,7 @@ inherits whatever spacing your theme gives its content. Three flags adjust the f
 | `--gap 8` | Space above and below the gallery (default 8). Themes often set a large margin here — Ghost's own default is `max(12vmin, 64px)`, which is a visible hole on a tall screen. This replaces it. Negative values tuck the gallery up closer |
 | `--max-width 1800` | How wide the grid may grow, in pixels |
 | `--column-width 260` | Minimum column width; smaller means more columns |
+| `--insecure-http` | Allow a plain `http://` site or heart endpoint. Refused by default: the Admin API key is full write access to your site, and http puts it on the wire in the clear. Loopback addresses are exempt without the flag |
 
 A page still needs a name in Ghost's admin list, so when `--title` is blank it is
 filed as **Photo Scout Gallery** — an empty title is not reliably accepted by the
@@ -1170,7 +1196,7 @@ Full detail — ground rules, how to run the tests, style — is in
 anything inside `--root`. This is the one rule with no exceptions, and
 `tests/_selftest_readonly.py` exists to prove it.
 
-**Prove it, don't assert it.** Thirteen suites live in `tests/`; run them with
+**Prove it, don't assert it.** Fifteen suites live in `tests/`; run them with
 `for t in tests/_selftest*.py; do python "$t"; done`. Several real bugs here were
 caught only because a test drove an actual browser rather than inspecting the
 generated HTML. When you fix something, add the test that would have caught it, and
@@ -1178,6 +1204,9 @@ check it fails without your fix.
 
 **`photo_scout_strong_top.py` is generated**, not hand-edited. `_make_variant.py`
 derives it from `photo_scout.py`. Change the parent and re-run the generator.
+
+**Report vulnerabilities privately.** [SECURITY.md](SECURITY.md) says what is in
+scope and where to send it. Please don't open a public issue for one.
 
 **Comments explain why, not what.** The code is read far more often than it is
 written, frequently by someone who is not a professional developer. A comment that

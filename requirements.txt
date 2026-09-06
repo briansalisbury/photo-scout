@@ -1,9 +1,17 @@
 # Core (required)
+#
+# The floors are security floors, not feature floors: each is the lowest release
+# PyPI reports no known advisory against. Photo Scout opens files it did not
+# create - RAW, JPEG, video - so the decoders are the part of the stack most
+# worth keeping current. Check them yourself with:
+#
+#     pip install pip-audit && pip-audit
+#
 numpy>=1.24
-pillow>=10.0
+pillow>=12.3.0       # everything below this has open advisories; CVE-2026-59205 and friends
 rawpy>=0.19          # NEF/RAW decoding - ships prebuilt LibRaw, no separate install
-transformers>=4.40   # CLIP ViT-L/14
-torch>=2.1           # see README: install the CUDA build first if you have an NVIDIA GPU
+transformers>=5.10.0 # CLIP ViT-L/14. 5.x is a major release: if you are on 4.x, expect an upgrade
+torch>=2.13.0        # see README: install the CUDA build first if you have an NVIDIA GPU
 
 # Optional but recommended - adds the NIMA technical-quality model.
 # If this fails to install, the script still runs (pass --no-nima).
@@ -14,3 +22,7 @@ pyiqa>=0.1.10
 #   macOS:    brew install ffmpeg
 #   Linux:    sudo apt install ffmpeg
 # Without them the script processes stills only and says so.
+#
+# ffmpeg is a native decoder handling files from wherever your library came
+# from. Keep it patched the way you keep your browser patched - the distribution
+# package is the easy way to stay current.

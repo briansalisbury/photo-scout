@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so a dependency advisory published after a quiet month still
+    # turns up. Most of what this catches will arrive this way, not from a push.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the tools
+        run: pip install ruff bandit
+
+      - name: Ruff
+        # Syntax and obvious mistakes only. This project is not linted to a
+        # style; a contributor should not have to fight a formatter to fix a bug.
+        run: ruff check --select E9,F63,F7,F82 .
+
+      - name: Bandit
+        # B101  assert, which the test suites use throughout by design.
+        # B404, B603, B607  calling ffmpeg and ffprobe by name on PATH. That is
+        #   how this project finds them, and every call passes a list with no
+        #   shell, which is the part that actually matters.
+        # Everything else is either fixed or carries a `# nosec` naming why.
+        run: bandit -r . -x ./tests --skip B101,B404,B603,B607
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit the declared floors
+        # --strict so an advisory fails the run rather than printing a note
+        # nobody reads. If this goes red, requirements.txt needs a new floor.
+        run: |
+          pip-audit --strict -r requirements.txt
+          pip-audit --strict -r hearts/requirements.txt
+
+  dependency-review:
+    # Pull requests only - it compares the base branch against the head, so
+    # there is nothing for it to do on a push.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          # The default suite plus the extra queries. This repository is small
+          # enough that the wider net costs nothing.
+          queries: security-and-quality
+      - uses: github/codeql-action/analyze@v3
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install the dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r hearts/requirements.txt
+          pip install playwright && playwright install --with-deps chromium
+
+      - name: Run the suites
+        # They execute at import rather than defining test functions, so they
+        # are run directly. A non-zero exit from any one fails the job.
+        run: |
+          for t in tests/_selftest*.py; do
+            echo "--- $t"
+            python "$t" || exit 1
+          done
+
+      - name: The generated variant must match its generator
+        # photo_scout_strong_top.py is derived from photo_scout.py. A hand-edit
+        # would be silently overwritten, so catch it here instead.
+        run: |
+          cp photo_scout_strong_top.py /tmp/committed.py
+          python _make_variant.py
+          diff -u /tmp/committed.py photo_scout_strong_top.py

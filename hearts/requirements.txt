@@ -1,2 +1,5 @@
-Flask>=3.0,<4
-waitress>=3.0,<4
+# Floors are the lowest releases with no known advisory against them. This is
+# the one component that listens on a network, so it is the one where a stale
+# dependency actually costs something.
+Flask>=3.1.3,<4
+waitress>=3.0.1,<4
