@@ -1,30 +1,24 @@
 # Photo Scout
 
-Photo Scout creates a report in a photo gallery style page of your highest-rated
-stills, based on technical quality, aesthetics, and configurable subject matter
-preferences (for example: desert or night sky). It's intended as a quality and
-subject assessment and scoring application for a large photo or video library to
-quickly narrow down top-rated stills. The photo gallery report results can also be
-uploaded to any Ghost CMS implementation that permits API access.
+![The Photo Scout report: a shortlist of top picks and strong photographs, each card showing its rating, score, folder, capture date and resolution, and the reasons behind its score](docs/images/photo-scout-report.png)
 
-Everything runs on your own machine — no API calls, no per-image cost, nothing
-uploaded.
+Photo Scout is an AI-powered photo **and video** analysis system that runs 
+entirely on your own machine.
+
+Photo Scout creates a photo gallery of your highest-rated stills, based on 
+technical quality, aesthetics, and configurable subject matter preferences
+(for example: desert or night sky). It's intended as a quality and subject
+assessment and scoring application for a large photo or video library to 
+quickly narrow down top-rated stills. 
+
+The report can be uploaded as a photo gallery to any [Ghost CMS](https://ghost.org) 
+implementation that permits API access, and it optionally features a 
+deployable "Heart" service to view and track visitor's most liked photos.
 
 Point it at a library, walk away, come back to a single report: every photograph
 scored, near-duplicate frames collapsed, one line of plain-language feedback each,
 and a link straight into your file manager. Scoring is resumable — stop it with
 Ctrl+C and the same command picks up where it left off.
-
-Photos and video are handled in the **same pass** — clips get sampled, scored by the
-same models, and the best moments exported as full-resolution stills. See section 8.
-
-**Your library is treated as strictly read-only.** Originals are opened for reading
-only, and nothing is created, changed or deleted anywhere inside it — not scores,
-not thumbnails, not previews. Every byte the script writes goes to its output
-directory, which defaults to `_photo_scout` beside the script. Point `--out` inside
-the library and the script refuses to run. There is a test whose entire job is to
-prove this: it fingerprints every file in a test library before and after a full run
-and asserts byte-for-byte identity.
 
 Released under the **GNU General Public License v3.0 or later** — see
 [Licence](#13-licence).
@@ -44,6 +38,7 @@ Quote any path containing spaces, on every platform.
 
 | | |
 |---|---|
+| [What AI does Photo Scout use?](#what-ai-does-photo-scout-use) | the models behind the scores |
 | [1. What it actually measures](#1-what-it-actually-measures) | the three scoring axes |
 | [2. The other things the script handles](#2-the-other-things-the-script-handles) | RAW, dedup, resume, the size floor |
 | [3. Install](#3-install) | requirements and setup |
@@ -58,6 +53,38 @@ Quote any path containing spaces, on every platform.
 | [12. Troubleshooting](#12-troubleshooting) | errors whose cause is far from the symptom |
 | [13. Licence](#13-licence) | GPL-3.0-or-later |
 | [14. Contributing](#14-contributing) | tests, style, how to help |
+
+---
+
+## What AI does Photo Scout use?
+
+Photo Scout actually understands what is in the photograph. The current implementation has **three scoring axes**, two of which are explicitly neural-network/AI models and the third uses CLIP, which is also a neural network:
+
+| Component | Technology | AI/ML? | Purpose |
+|---|---|---|---|
+| **Aesthetic** | LAION-Aesthetic V2 + CLIP ViT-L/14 | **Yes** | Estimates photographic/aesthetic quality |
+| **Technical** | NIMA | **Yes** | Estimates technical photographic quality |
+| **Subject** | CLIP ViT-L/14 | **Yes** | Determines how well the image matches desired subjects |
+| Sharpness | Laplacian variance | No | Detects blur/focus problems |
+| Clipping | Pixel analysis | No | Detects blown highlights/crushed blacks |
+| Deduplication | Perceptual hash | No | Groups near-identical images |
+
+Photo Scout uses **CLIP's image/text similarity capability**. It has configurable categories such as:
+
+- red-rock canyons
+- golden-hour peaks
+- wide vistas
+- desert terrain
+- alpine lakes
+- salt flats
+- night sky
+- storm light
+
+It also has secondary categories such as architecture, wildlife, botanical macro, black-and-white photography, abstract texture, etc., plus "distractor" categories such as documents, food, accidental frames and test shots.
+
+So, for example, it can effectively distinguish:
+
+> "This is a technically good photograph, but it isn't the type of photograph I'm looking for."
 
 ---
 
@@ -1147,6 +1174,24 @@ the matching photographs, so a search for *night* leaves every folder wearing it
 best night frame. Inside a folder the lightbox walks that folder only and stops
 at its edges, and the sort box drops its Folder A–Z and Folder Z–A options,
 which sort nothing when every photograph shares the folder. `--view all` publishes a page that opens flat instead.
+
+Every folder and photograph has its own link. The page's address follows what
+is open — `…/photos/#folder=arches-national-park` for a folder,
+`…/photos/#photo=3f9c1d84b0e77265` for a photograph, which opens inside its
+folder so the arrows walk the rest of that shoot. **Copy link** in a folder's
+header and in the lightbox puts that address on the clipboard; on a phone the
+button reads **Share** and opens the system share sheet instead. Opening things
+adds history entries, so a phone's Back button closes the lightbox or returns
+to the index rather than leaving the page. Nothing here involves Ghost: the
+part after the `#` never leaves the browser.
+
+Links survive republishing and rescoring. A photograph's link is derived from
+its path inside your library, and a folder's from its name, so renaming or
+moving either breaks links to it — the same rule hearts already follow, since
+they are keyed the same way. A dead link lands on the index with a note saying
+so. One limitation is structural: a link preview in a chat app is built from
+the page itself, and the `#` part never reaches the server that builds it, so
+every link previews as the gallery page rather than as the photograph.
 
 A folder's photographs are built into the page when you open that folder, not
 when the page loads, and the filters run on the published data rather than on

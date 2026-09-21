@@ -552,6 +552,14 @@ with sync_playwright() as pw:
     check("both view buttons are reachable",
           P4.eval_on_selector_all(".psc-views button",
                                   "els => els.filter(e => e.offsetParent !== null).length") == 2)
+    # Pinned over the photographs, so every row it wraps onto costs the
+    # visitor a row of pictures for as long as they scroll.
+    bar_h = P4.eval_on_selector(".psc-bar", "e => e.getBoundingClientRect().height")
+    check("the bar stays compact on a phone", bar_h < 844 * 0.15, f"{bar_h:.0f}px of 844")
+    def bg4(sel):
+        return P4.eval_on_selector(sel, "e => getComputedStyle(e).backgroundColor")
+    check("the active view and the active band are different colours",
+          bg4(".psc-views button.on") != bg4(".psc-bar button[data-band].on"))
 
     print("\n--- the lightbox under a serif theme ---")
     # The overlay and the toast are moved out to <body>, beyond the gallery, so
@@ -573,6 +581,126 @@ with sync_playwright() as pw:
               fam(sel) == gallery and "Georgia" not in fam(sel), fam(sel))
     check("and the toast keeps its own size",
           P5.eval_on_selector(".psc-toast", "e => getComputedStyle(e).fontSize") == "13px")
+
+    print("\n--- links to a folder or a photograph ---")
+    raw = json.loads(re.search(r'<script type="application/json" class="psc-data">(.*?)</script>',
+                               (OUT / "live.html").read_text(encoding="utf-8"), re.S).group(1))
+    wy = raw["g"].index("Wyoming and Tetons")
+    wy_photos = [p for p in raw["p"] if p["g"] == wy]
+    target = wy_photos[2]
+    base = (OUT / "live.html").as_uri()
+    # The clipboard and the share sheet are stood in for, so the test can read
+    # what would have been copied or shared.
+    STUB = """window.__copied = null; window.__shared = null;
+      Object.defineProperty(navigator, 'clipboard', {value: {writeText: function(t){
+        window.__copied = t; return Promise.resolve(); }}});"""
+    lctx = br.new_context()
+    lctx.add_init_script(STUB)
+    L = lctx.new_page()
+    L.on("pageerror", lambda e: errors.append(str(e)))
+    def lvis(sel):
+        return L.eval_on_selector_all(
+            sel, "els => els.filter(e => e.offsetParent !== null).length")
+    def lb_open():
+        return L.eval_on_selector(".psc-lb", "e => e.classList.contains('open')")
+    def hash_():
+        return L.evaluate("location.hash")
+
+    L.goto(base + "#folder=wyoming-and-tetons"); L.wait_for_timeout(500)
+    check("a folder link opens that folder",
+          L.inner_text(".psc-crumb h3") == "Wyoming and Tetons" and lvis(".psc-fold") == 0,
+          L.inner_text(".psc-crumb h3"))
+    check("with the overlay closed", not lb_open())
+    L.click(".psc-crumb .psc-link"); L.wait_for_timeout(200)
+    check("the folder's own button copies a link to it",
+          (L.evaluate("window.__copied") or "").endswith("#folder=wyoming-and-tetons"),
+          L.evaluate("window.__copied"))
+    check("and says so", "Link copied" in L.inner_text(".psc-toast"))
+
+    L.goto(base + "#photo=" + target["id"]); L.wait_for_timeout(500)
+    check("a photograph link opens that photograph", lb_open()
+          and L.inner_text(".psc-lb .psc-cap") == target["n"], L.inner_text(".psc-lb .psc-cap"))
+    check("inside its own folder, so the arrows walk that shoot",
+          L.inner_text(".psc-count-lb").endswith(f"/ {len(wy_photos)}"),
+          L.inner_text(".psc-count-lb"))
+    L.click(".psc-link-lb"); L.wait_for_timeout(200)
+    check("the overlay's button copies a link to the photograph on screen",
+          (L.evaluate("window.__copied") or "").endswith("#photo=" + target["id"]),
+          L.evaluate("window.__copied"))
+    check("without closing the overlay", lb_open())
+    before = L.evaluate("history.length")
+    L.keyboard.press("ArrowRight"); L.wait_for_timeout(200)
+    L.keyboard.press("ArrowRight"); L.wait_for_timeout(200)
+    check("stepping moves the link along with the photograph",
+          hash_().startswith("#photo=") and hash_() != "#photo=" + target["id"], hash_())
+    check("without piling up history", L.evaluate("history.length") == before,
+          f"{before} -> {L.evaluate('history.length')}")
+    L.keyboard.press("Escape"); L.wait_for_timeout(300)
+    check("closing an overlay that came from a link stays in the gallery",
+          not lb_open() and hash_() == "#folder=wyoming-and-tetons"
+          and L.evaluate("location.href").startswith(base), hash_())
+
+    # Built up by clicking, then taken apart with Back, as a phone would.
+    L.goto(base); L.wait_for_timeout(500)
+    L.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
+    L.goto(base); L.wait_for_timeout(500)
+    L.click(f'.psc-fold[data-group="{wy}"]'); L.wait_for_timeout(300)
+    check("opening a folder puts it in the address", hash_() == "#folder=wyoming-and-tetons",
+          hash_())
+    L.click(".psc-card:not(.psc-hidden) img"); L.wait_for_timeout(300)
+    check("and opening a photograph does too", hash_().startswith("#photo="), hash_())
+    L.go_back(); L.wait_for_timeout(300)
+    check("Back closes the overlay", not lb_open() and hash_() == "#folder=wyoming-and-tetons",
+          hash_())
+    L.go_back(); L.wait_for_timeout(300)
+    check("and Back again returns to the index",
+          lvis(".psc-fold") == 5 and hash_() == "", hash_())
+    L.go_forward(); L.wait_for_timeout(300)
+    check("Forward reopens the folder", L.inner_text(".psc-crumb h3") == "Wyoming and Tetons")
+    L.click(".psc-back"); L.wait_for_timeout(300)
+    check("the back button agrees with Back", lvis(".psc-fold") == 5 and hash_() == "", hash_())
+
+    print("\n--- links that lead nowhere ---")
+    for bad, what in (("#photo=deadbeefdeadbeef", "a photograph since hidden"),
+                      ("#folder=a-folder-since-renamed", "a folder since renamed"),
+                      ("#folder=__proto__", "a prototype name"),
+                      ("#folder=constructor", "another one"),
+                      ("#photo=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E", "markup")):
+        L.goto(base + bad); L.wait_for_timeout(500)
+        check(f"{what}: lands on the index with a note, not an error",
+              lvis(".psc-fold") == 5 and "no longer in this gallery" in L.inner_text(".psc-toast"),
+              L.inner_text(".psc-toast"))
+        check(f"{what}: and the dead link is cleared from the address", hash_() == "", hash_())
+    L.goto(base + "#/portal/signup"); L.wait_for_timeout(500)
+    check("a hash that is not ours - Ghost's own portal - is left alone",
+          hash_() == "#/portal/signup" and lvis(".psc-fold") == 5, hash_())
+
+    print("\n--- a link wins over the remembered view, without replacing it ---")
+    L.goto(base); L.wait_for_timeout(300)
+    L.click(".psc-vall"); L.wait_for_timeout(300)
+    L.goto(base + "#folder=bonneville"); L.wait_for_timeout(500)
+    check("a folder link opens the folder even for an All photos visitor",
+          L.inner_text(".psc-crumb h3") == "Bonneville")
+    L.goto(base); L.wait_for_timeout(500)
+    check("and their own choice is still waiting next time",
+          lvis(".psc-fold") == 0 and lvis(".psc-card") == TOTAL)
+    lctx.close()
+
+    # A phone gets the share sheet, which is what a person on a phone expects.
+    mctx = br.new_context(has_touch=True, is_mobile=True,
+                          viewport={"width": 390, "height": 844})
+    mctx.add_init_script(STUB + """navigator.share = function(d){
+        window.__shared = d; return Promise.resolve(); };""")
+    M = mctx.new_page()
+    M.on("pageerror", lambda e: errors.append(str(e)))
+    M.goto(base + "#photo=" + target["id"]); M.wait_for_timeout(500)
+    check("on a phone the button says Share",
+          M.inner_text(".psc-link-lb").strip() == "Share", M.inner_text(".psc-link-lb"))
+    M.click(".psc-link-lb"); M.wait_for_timeout(200)
+    shared = M.evaluate("window.__shared") or {}
+    check("and hands the link to the share sheet",
+          (shared.get("url") or "").endswith("#photo=" + target["id"]), str(shared))
+    mctx.close()
 
     check("no page errors anywhere", not errors, "; ".join(errors[:3]))
     br.close()

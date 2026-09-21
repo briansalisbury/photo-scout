@@ -2654,7 +2654,13 @@ HTML_TEMPLATE = r"""<!doctype html>
  #views { display:inline-flex; }
  #views button { border-radius:0; margin:0; }
  #views button:first-child { border-radius:6px 0 0 6px; }
- #views button:last-child { border-radius:0 6px 6px 0; border-left-width:0; }
+ /* The two share an edge by overlapping it rather than dropping one border, so
+    whichever is active can sit on top and show its outline all the way round. */
+ #views button:last-child { border-radius:0 6px 6px 0; margin-left:-1px; }
+ /* Manila when active, matching the folder tiles, so the view switch reads as
+    a different kind of control from the rating filters' green beside it. */
+ #views button.on { position:relative; z-index:1; background:#54452a;
+   border-color:#b09468; color:#f5e9d0; }
  /* The folder picker says nothing in the folder view: on the index the tiles
     ARE the folders, and inside one you are already in a folder. It comes back
     in All photos, which is the only place it can narrow anything, and your
@@ -2755,7 +2761,38 @@ HTML_TEMPLATE = r"""<!doctype html>
     focus, and there is no way to opt out without disabling pinch for everyone.
     Touch pointers only, so the desktop bar stays compact. */
  @media (pointer:coarse) {
-   input, select, #q, .taginput, .controls button, .controls select { font-size:16px; }
+   input, select, #q, .taginput, .controls select { font-size:16px; }
+ }
+ /* A phone in portrait. The header is pinned over the photographs, so every
+    row it wraps onto is a row of photographs lost for as long as you scroll.
+    Buttons stay 13px - only text fields make iOS zoom, so only they need 16px
+    - and keep a comfortable height for a thumb; the saving comes from the
+    padding around them and from fewer rows. The title and the stats scroll
+    away on their own: see pinControlsOnly in the script. */
+ @media (max-width:600px) {
+   header { padding:8px 10px; }
+   h1 { font-size:15px; margin:0 0 2px; }
+   .stats { font-size:11.5px; margin-bottom:8px; }
+   .controls { gap:6px; }
+   .controls button { padding:5px 8px; font-size:12.5px; }
+   .controls select { padding:4px 8px; }
+   #zoom button { min-width:30px; padding:5px 8px; font-size:14px; }
+   /* A 60% basis gives the search box a row of its own, shared with Save tags,
+      rather than letting it squeeze in after something else and overflow. */
+   #searchbox { flex:1 1 60%; min-width:0; padding:2px 7px; }
+   #q { min-width:0; }
+   #folder { margin-left:0 !important; }
+   /* Rows, in order: the rating bands; the view switch with the
+      near-duplicates box and the zoom beside it; the folder picker (All photos
+      only); sort and Photos/video; search and Save tags. */
+   #views, .controls label, #zoom { order:1; }
+   #folder { order:2; }
+   #sort, #kind { order:3; }
+   #searchbox, #savetags { order:4; }
+   /* Sort and Photos/video share a row, each taking half. A long choice is
+      cut short rather than pushing the other onto a row of its own. */
+   #sort, #kind { flex:1 1 40%; min-width:0; }
+   .controls label { font-size:12px; }
  }
 </style>
 <header>
@@ -2848,6 +2885,26 @@ __CARDS__
 <script>
  const grid = document.getElementById('grid');
  const qEl = document.getElementById('q');
+
+ // ==== the pinned header on a phone ========================================
+ // The whole header is sticky so the controls stay reachable a thousand
+ // photographs down. On a narrow screen the title and the stats paragraph above
+ // them take several lines that nobody needs while scrolling, so the header is
+ // pinned by a negative offset instead: it sticks with those lines already
+ // scrolled out of view, and only the controls stay on screen. At the top of
+ // the page everything is still there.
+ (function pinControlsOnly() {
+   const header = document.querySelector('header');
+   const controls = header && header.querySelector('.controls');
+   if (!controls || !window.matchMedia) return;
+   const narrow = matchMedia('(max-width:600px)');
+   function fit() {
+     header.style.top = narrow.matches ? -(controls.offsetTop - 8) + 'px' : '';
+   }
+   fit();
+   window.addEventListener('resize', fit);
+   if (narrow.addEventListener) narrow.addEventListener('change', fit);
+ })();
 
  // ==== the model ============================================================
  // Every card is written by Python and parked in a template. A template's

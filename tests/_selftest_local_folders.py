@@ -299,6 +299,31 @@ with sync_playwright() as pw:
           f"{P3.eval_on_selector_all('.fold', 'e => e.length')} tiles, "
           f"{P3.eval_on_selector_all('.card', 'e => e.length')} cards")
 
+    print("\n--- the colours tell the controls apart")
+    P3.click("#views button[data-view='all']"); P3.wait_for_timeout(300)
+    def bg(sel):
+        return P3.eval_on_selector(sel, "e => getComputedStyle(e).backgroundColor")
+    check("the active view and the active band are different colours",
+          bg("#views button.on") != bg("button[data-f].on"),
+          f"{bg('#views button.on')} vs {bg('button[data-f].on')}")
+
+    print("\n--- a phone in portrait")
+    ph = br.new_context(viewport={"width": 390, "height": 844},
+                        has_touch=True, is_mobile=True).new_page()
+    ph.on("pageerror", lambda e: errors.append(str(e)))
+    ph.goto(REPORT.resolve().as_uri()); ph.wait_for_timeout(500)
+    ph.click("#views button[data-view='all']"); ph.wait_for_timeout(300)
+    check("the controls do not push the page sideways",
+          ph.evaluate("document.documentElement.scrollWidth <= "
+                      "document.documentElement.clientWidth + 1"))
+    ph.evaluate("window.scrollTo(0, 900)"); ph.wait_for_timeout(200)
+    pinned = ph.eval_on_selector("header", "e => e.getBoundingClientRect().bottom")
+    check("scrolled down, the pinned header takes under a quarter of the screen",
+          pinned < 844 * 0.25, f"{pinned:.0f}px of 844")
+    check("with the title scrolled away and the controls still in reach",
+          ph.eval_on_selector("h1", "e => e.getBoundingClientRect().bottom") <= 0
+          and ph.eval_on_selector(".controls", "e => e.getBoundingClientRect().top") >= 0)
+
     check("no page errors anywhere", not errors, "; ".join(errors[:3]))
     br.close()
 

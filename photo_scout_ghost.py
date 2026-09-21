@@ -802,6 +802,12 @@ __HEADCSS__
   background:rgba(0,0,0,.45);padding:3px 12px;border-radius:99px;z-index:2;
   white-space:nowrap;font-variant-numeric:tabular-nums}
 .psc-dims-lb:empty{display:none}
+/* Bottom right, clear of the heart on the left and the count in the middle,
+   and dressed like both of them. */
+.psc-link-lb{position:absolute;bottom:14px;right:20px;z-index:2;color:#ddd;
+  background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);
+  border-radius:99px;padding:5px 14px;font-size:12.5px;cursor:pointer}
+.psc-link-lb:hover{background:rgba(0,0,0,.75)}
 .psc-hearts-lb{position:absolute;bottom:14px;left:20px;z-index:2;margin:0;
   background:rgba(0,0,0,.45);padding:5px 14px;border-radius:99px}
 .psc-hearts-lb .psc-heart{font-size:20px}
@@ -826,7 +832,18 @@ __HEADCSS__
 .psc-views{display:inline-flex}
 .psc-views button{border-radius:0;margin:0}
 .psc-views button:first-child{border-radius:6px 0 0 6px}
-.psc-views button:last-child{border-radius:0 6px 6px 0;border-left-width:0}
+/* The two share an edge by overlapping it rather than dropping one border, so
+   whichever is active can sit on top and show its outline all the way round. */
+.psc-views button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+.psc-views button.on{position:relative;z-index:1}
+
+/* Each group of toggles has its own colour when active, so a glance tells you
+   which view you are in, which rating band is on, and whether Liked is
+   filtering - rather than one green for all three questions. Manila for the
+   view, matching the folder tiles; the familiar green for the bands; rose for
+   Liked, after the heart. Text on each clears 7:1, or 4.8:1 for the green. */
+.psc-bar .psc-views button.on{background:#54452a;border-color:#b09468;color:#f5e9d0}
+.psc-bar .psc-likedonly.on{background:#732c40;border-color:#c2607a;color:#ffe0e7}
 
 /* The index shares the photo grid's column track, so a tile is exactly as wide
    as a card and the two views line up when you switch between them. */
@@ -934,6 +951,11 @@ __HEADCSS__
   border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer;flex:none}
 .psc-crumb .psc-back:hover{border-color:#5a5a5a}
 .psc-crumbn{color:var(--psc-mut);font-size:12.5px;margin-left:auto;flex:none}
+/* Copy link: the same quiet button as the way back, so the header reads as
+   one row of controls rather than a call to action. */
+.psc-crumb .psc-link{background:#242424;color:var(--psc-fg);border:1px solid #3a3a3a;
+  border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer;flex:none}
+.psc-crumb .psc-link:hover{border-color:#5a5a5a}
 /* Shown instead of the tiles when a search matches nothing anywhere. */
 .psc-empty{display:none;color:var(--psc-mut);padding:26px 2px;text-align:center}
 
@@ -944,7 +966,23 @@ __HEADCSS__
      column off the screen: three 115px columns need 361px at 8px, 373px at 14. */
   .psc-grid{gap:8px}
   .psc-folders{gap:8px;row-gap:calc(8px + var(--psc-tab))}
-  .psc-bar{margin-left:-10px;margin-right:-10px;padding:8px 10px}
+  .psc-bar{margin-left:-10px;margin-right:-10px;padding:6px 10px;gap:6px}
+  /* A tighter bar on a phone, where it is pinned over the photographs. The
+     buttons keep a comfortable height for a thumb; the saving comes from the
+     padding around them and from the rows they wrap onto. */
+  .psc-bar button{padding:5px 8px;font-size:12.5px}
+  .psc-bar .psc-zoom button{min-width:30px;font-size:14px}
+  /* A 60% basis puts the search box on a row of its own with the count
+     beside it, rather than letting it squeeze in after the buttons. */
+  .psc-searchwrap{flex:1 1 60%;min-width:0;padding:2px 7px}
+  .psc-bar .psc-q{min-width:0}
+  .psc-bar select{padding:4px 8px}
+  /* The count sits beside the search box instead of on a row of its own. It
+     follows the search in the markup, so giving both the same order keeps
+     them together; the sort, Save tags and zoom follow on the next row. */
+  .psc-searchwrap,.psc-count{order:1}
+  .psc-sort,.psc-save,.psc-zoom{order:2}
+  .psc-count{font-size:11.5px}
 }
 </style>
 """
@@ -1063,7 +1101,7 @@ GALLERY_JS = r"""
     if (p.th) {
       var im = document.createElement('img');
       im.loading = 'lazy'; im.src = p.th; im.alt = p.n || '';
-      im.addEventListener('click', function(){ openLb(i); });
+      im.addEventListener('click', function(){ navPhoto(i); });
       c.appendChild(im);
     }
     var b = document.createElement('div'); b.className = 'psc-body';
@@ -1553,8 +1591,10 @@ GALLERY_JS = r"""
       var wasOn = (cur >= 0 && order.length) ? order[cur] : -1;
       order = visibleIdx();
       cur = order.indexOf(wasOn);
-      if (cur < 0) { if (order.length) { cur = 0; show(); } else closeLb(); }
-      else show();
+      if (cur < 0) {
+        if (order.length) { cur = 0; show(); writeHash('photo', false); }
+        else { closeLb(); writeHash(openGroup >= 0 ? 'folder' : '', false); }
+      } else show();
     }
   }
   root.querySelectorAll('.psc-bar button[data-band]').forEach(function(btn){
@@ -1696,7 +1736,7 @@ GALLERY_JS = r"""
     mh.className = 'psc-fhearts';
     mt.appendChild(mc); mt.appendChild(mh);
     t.appendChild(mos); t.appendChild(nm); t.appendChild(mt);
-    t.onclick = function(){ openFolder(gi); };
+    t.onclick = function(){ navFolder(gi); };
     folders.appendChild(t);
     tiles.push({el: t, gi: gi, mos: mos, imgs: imgs, meta: mc, hearts: mh});
   });
@@ -1914,10 +1954,10 @@ GALLERY_JS = r"""
   }
 
   root.querySelectorAll('.psc-views button').forEach(function(b){
-    b.onclick = function(){ setView(b.dataset.view); };
+    b.onclick = function(){ setView(b.dataset.view); writeHash('', false); };
   });
   var backBtn = root.querySelector('.psc-back');
-  if (backBtn) backBtn.onclick = closeFolder;
+  if (backBtn) backBtn.onclick = navCloseFolder;
   ensureView();
   syncBar();
 
@@ -2173,6 +2213,9 @@ GALLERY_JS = r"""
     if (!order.length) return;
     cur = (cur + d + order.length) % order.length;    // wraps at both ends
     show();
+    // Replaced rather than pushed: fifty photographs swiped through should not
+    // take fifty presses of Back to leave.
+    writeHash('photo', false);
   }
 
   var lockPrev = null;
@@ -2276,12 +2319,12 @@ GALLERY_JS = r"""
     step(dx < 0 ? 1 : -1);
   }, {passive: true});
   // Backdrop closes; the photo and the arrows must not.
-  lb.addEventListener('click', function(e){ if (e.target === lb) closeLb(); });
+  lb.addEventListener('click', function(e){ if (e.target === lb) navCloseLb(); });
   lbImg.addEventListener('click', function(e){ e.stopPropagation(); });
   navPrev.addEventListener('click', function(e){ e.stopPropagation(); step(-1); });
   navNext.addEventListener('click', function(e){ e.stopPropagation(); step(1); });
   lb.querySelector('.x').addEventListener('click', function(e){
-    e.stopPropagation(); closeLb(); });
+    e.stopPropagation(); navCloseLb(); });
   // overflow:hidden on html/body is not reliably honoured for wheel scrolling,
   // so the gesture is cancelled at source while the overlay is open. Needs
   // passive:false or preventDefault is ignored.
@@ -2306,14 +2349,175 @@ GALLERY_JS = r"""
   lb.addEventListener('touchmove', blockScroll, {passive: false});
   document.addEventListener('keydown', function(e){
     if (!lb.classList.contains('open')) return;
-    if (e.key === 'Escape') closeLb();
+    if (e.key === 'Escape') navCloseLb();
     else if (e.key === 'ArrowLeft')  { e.preventDefault(); step(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
-    else if (e.key === 'Home') { e.preventDefault(); cur = 0; show(); }
-    else if (e.key === 'End')  { e.preventDefault(); cur = order.length - 1; show(); }
+    else if (e.key === 'Home') { e.preventDefault(); cur = 0; show(); writeHash('photo', false); }
+    else if (e.key === 'End')  { e.preventDefault(); cur = order.length - 1; show();
+                                 writeHash('photo', false); }
+  });
+
+  // ---- links to a folder or a photograph ----------------------------------
+  // The address carries what is open, after the '#':
+  //
+  //   #folder=arches-national-park    that folder
+  //   #photo=3f9c1d84b0e77265         that photograph, inside its folder
+  //
+  // Everything after a '#' stays in the browser - Ghost never sees it - so
+  // nothing on the server has to know these exist. Opening a folder or a
+  // photograph adds a history entry, so a phone's Back button closes the
+  // overlay or returns to the index instead of leaving the page; stepping
+  // through the overlay only rewrites the entry it is on.
+  //
+  // What follows the '#' is whatever somebody typed or was sent. It is only
+  // ever looked up, never written into the page, and the tables it is looked
+  // up in have no prototype - on an ordinary object, '#folder=constructor'
+  // would find something.
+  function slugify(name){
+    var s = String(name);
+    if (s.normalize) s = s.normalize('NFKD').replace(/[̀-ͯ]/g, '');
+    s = s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    // A name with no Latin letters at all still needs a link.
+    return s || encodeURIComponent(String(name).toLowerCase());
+  }
+  // The key a link is matched on. Encoding is normalised, so a link survives a
+  // browser or a chat app re-encoding it on the way.
+  function linkKey(raw){
+    try { return encodeURIComponent(decodeURIComponent(raw)).toLowerCase(); }
+    catch (e) { return ''; }
+  }
+  var SLUGS = [], SLUG_TO_G = Object.create(null), ID_TO_I = Object.create(null);
+  GROUPS.forEach(function(name, gi){
+    // Two folders can come down to the same words once punctuation goes;
+    // the second gets a number rather than stealing the first one's link.
+    var s = slugify(name), base = s, n = 2;
+    while (linkKey(s) in SLUG_TO_G) s = base + '-' + (n++);
+    SLUGS.push(s); SLUG_TO_G[linkKey(s)] = gi;
+  });
+  DATA.forEach(function(p, i){ ID_TO_I[String(p.id).toLowerCase()] = i; });
+
+  function pageUrl(){ return location.href.split('#')[0]; }
+  function currentHash(){
+    if (lb.classList.contains('open') && cur >= 0 && order.length)
+      return '#photo=' + DATA[order[cur]].id;
+    if (view === 'folders' && openGroup >= 0) return '#folder=' + SLUGS[openGroup];
+    return '';
+  }
+  // push: a new history entry. Otherwise the current one is rewritten, and
+  // keeps knowing whether this page pushed it - which is what decides whether
+  // closing something can safely go Back, or would leave the site.
+  function writeHash(kind, push){
+    try {
+      var st = history.state, url = pageUrl() + currentHash();
+      if (push) history.pushState({psc: kind, pushed: true}, '', url);
+      else history.replaceState({psc: kind, pushed: !!(st && st.pushed && st.psc === kind)},
+                                '', url);
+    } catch (e) {}
+  }
+  function pushedHere(kind){
+    var st = history.state;
+    return !!(st && st.psc === kind && st.pushed);
+  }
+
+  function navFolder(gi){ openFolder(gi); writeHash('folder', true); }
+  function navPhoto(i){ openLb(i); writeHash('photo', true); }
+  // Closing goes Back when this page put the entry there, so Back and the
+  // close button agree. Otherwise - a photograph opened straight from a link -
+  // Back would leave the gallery, so the entry is rewritten instead.
+  function navCloseLb(){
+    if (pushedHere('photo')) { history.back(); return; }
+    closeLb(); writeHash(openGroup >= 0 ? 'folder' : '', false);
+  }
+  function navCloseFolder(){
+    if (pushedHere('folder')) { history.back(); return; }
+    closeFolder(); writeHash('', false);
+  }
+
+  function readHash(){
+    var m = /^#(folder|photo)=([^&]+)$/.exec(location.hash || '');
+    return m ? {kind: m[1], key: linkKey(m[2])} : null;
+  }
+  function notHere(kind){
+    toast(kind === 'photo' ? 'That photograph is no longer in this gallery'
+                           : 'That folder is no longer in this gallery');
+    try { history.replaceState(null, '', pageUrl() + currentHash()); } catch (e) {}
+  }
+  // first: the page has just loaded from a link. Otherwise Back or Forward
+  // has moved between entries this page made.
+  function followLink(first){
+    var t = readHash(), lbOpen = lb.classList.contains('open');
+    if (!t){
+      // A hash that is not one of ours - Ghost's own #/portal/, say - is left
+      // alone on arrival. Arriving back at one means leaving our states.
+      if (first) return;
+      if (lbOpen) closeLb();
+      if (view === 'folders' && openGroup >= 0) closeFolder();
+      return;
+    }
+    if (t.kind === 'folder'){
+      if (!(t.key in SLUG_TO_G)) return notHere('folder');
+      var gi = SLUG_TO_G[t.key];
+      if (lbOpen) closeLb();
+      // A link wins over the view this visitor last chose, without replacing
+      // it: the saved choice is still there the next time they come in.
+      view = 'folders';
+      if (openGroup !== gi) openFolder(gi); else { syncBar(); apply(); }
+      return;
+    }
+    if (!(t.key in ID_TO_I)) return notHere('photo');
+    var i = ID_TO_I[t.key];
+    // Opened inside its own folder, so the arrows walk the shoot it came from.
+    // In All photos, Back and Forward stay in All photos.
+    if (first || view === 'folders'){
+      view = 'folders';
+      if (openGroup !== DATA[i].g) openFolder(DATA[i].g);
+    }
+    if (lbOpen){
+      order = visibleIdx(); cur = order.indexOf(i);
+      if (cur < 0) { order = [i]; cur = 0; }
+      show();
+    } else openLb(i);
+  }
+  window.addEventListener('popstate', function(){ followLink(false); });
+
+  // ---- copy or share a link -----------------------------------------------
+  // On a phone the system share sheet, which is what a person on a phone
+  // expects; on a computer the clipboard, which is what they expect there.
+  var canShare = !!(navigator.share && window.matchMedia &&
+                    matchMedia('(pointer:coarse)').matches);
+  function shareLink(url, title){
+    if (canShare){ navigator.share({title: title, url: url}).catch(function(){}); return; }
+    function done(){ toast('Link copied'); }
+    function fallback(){
+      var ta = document.createElement('textarea');
+      ta.value = url; ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) {}
+      ta.remove();
+      if (ok) done(); else toast('Copy this link: ' + url);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(url).then(done, fallback);
+    else fallback();
+  }
+  var lbLink = lb.querySelector('.psc-link-lb');
+  var crumbLink = root.querySelector('.psc-crumb .psc-link');
+  [lbLink, crumbLink].forEach(function(b){ if (b && canShare) b.textContent = 'Share'; });
+  if (lbLink) lbLink.addEventListener('click', function(e){
+    e.stopPropagation();                   // the backdrop closes the overlay
+    if (cur < 0 || !order.length) return;
+    var p = DATA[order[cur]];
+    shareLink(pageUrl() + '#photo=' + p.id, p.n || document.title);
+  });
+  if (crumbLink) crumbLink.addEventListener('click', function(){
+    if (openGroup < 0) return;
+    shareLink(pageUrl() + '#folder=' + SLUGS[openGroup], GROUPS[openGroup]);
   });
 
   apply();
+  followLink(true);
 })();
 </script>
 """
@@ -2471,6 +2675,8 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         '<div class="psc-crumb">'
         '<button class="psc-back" type="button">&#8249; All folders</button>'
         '<h3></h3><span class="psc-crumbn"></span>'
+        '<button class="psc-link" type="button" '
+        'title="Copy a link that opens this folder">Copy link</button>'
         '</div>'
         '<div class="psc-folders"></div>'
         '<div class="psc-empty">Nothing matches that search.</div>'
@@ -2485,6 +2691,8 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
            '\u2764\ufe0f</button><span class="psc-hcount"></span></div>'
            if hearts_url else '') +
         '<span class="psc-count-lb"></span>'
+        '<button class="psc-link-lb" type="button" '
+        'title="Copy a link that opens this photograph">Copy link</button>'
         '<img alt=""></div>'
         '<div class="psc-foot">Generated by '
         # noopener, deliberately without noreferrer: the latter would strip the
