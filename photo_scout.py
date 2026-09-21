@@ -114,7 +114,7 @@ VIDEO_MAX_SAMPLES = 400          # safety cap per clip (400 x 3s = 20 min of foo
 # inter-frame compression, and motion blur from a shutter angle chosen to make
 # movement look smooth rather than to freeze an instant. None of that is
 # reliably visible in a downscaled proxy, so the models cannot see it - the
-# penalty is the part of the judgement they structurally cannot make.
+# penalty is the part of the judgment they structurally cannot make.
 #
 # What it does NOT stand for, deliberately: resolution. Pixel count is reported
 # beside each frame and left out of every score, here as everywhere else, so
@@ -175,7 +175,7 @@ VENV_SUBDIRS = {"lib", "lib64", "include", "scripts", "bin", "share", "etc"}
 
 # How the three axes combine into the headline number. Must sum to 1.0.
 #
-# Subject weight is deliberately low. CLIP recognises almost any competent
+# Subject weight is deliberately low. CLIP recognizes almost any competent
 # landscape as on-subject, so on a western-landscape library the subject score
 # saturates near 100 (observed median 96.6, p75 99.7) and adds roughly the same
 # constant to every photograph. It still earns its 0.15 by pushing snapshots,
@@ -598,7 +598,7 @@ def pretty_resolution(w: Optional[int], h: Optional[int]) -> str:
 
     Shown on every card precisely because resolution is kept out of the score.
     The models rank composition, light, focus and exposure; whether 2.1 MP is
-    enough for the licence you have in mind is a judgement about the job, not
+    enough for the license you have in mind is a judgment about the job, not
     about the photograph, so it is put in front of you rather than guessed at.
     """
     if not w or not h:
@@ -783,7 +783,7 @@ def load_image(path: Path, max_edge: int = SCORING_SIZE) -> Image.Image:
 
     img = img.convert("RGB")
 
-    # Honour the EXIF orientation flag so portrait shots aren't scored sideways.
+    # Honor the EXIF orientation flag so portrait shots aren't scored sideways.
     try:
         from PIL import ImageOps
         img = ImageOps.exif_transpose(img)
@@ -1063,7 +1063,7 @@ def sharpness_variance(img: Image.Image) -> float:
     The fixed 512x512 resize is what makes the number comparable between images.
     Laplacian variance rises with pixel count, so measuring at native size would
     report a soft 45 MP frame as sharper than a crisp 12 MP one - resolution
-    masquerading as focus. Callers already hand this a normalised canvas (see
+    masquerading as focus. Callers already hand this a normalized canvas (see
     _score_one); the resize here squares it up and guarantees the invariant
     even if some future caller forgets.
     """
@@ -1086,8 +1086,8 @@ def clipping_fraction(img: Image.Image) -> tuple[float, float]:
 
 def perceptual_hash(img: Image.Image) -> int:
     """
-    64-bit difference hash. Resize to 9x8 greyscale, then emit one bit per
-    horizontal neighbour comparison. Robust to exposure shifts and light crops,
+    64-bit difference hash. Resize to 9x8 grayscale, then emit one bit per
+    horizontal neighbor comparison. Robust to exposure shifts and light crops,
     which is exactly what we want for collapsing bracketed and burst frames.
     """
     g = np.asarray(img.convert("L").resize((9, 8), Image.LANCZOS), dtype=np.int16)
@@ -1256,7 +1256,7 @@ class Scorer:
             if built_with is None:
                 log("  This is a CPU-only build of PyTorch, so the GPU cannot be used")
                 log("  regardless of what hardware you have. Scoring still works at")
-                log("  roughly 1-2s per photo. See README section 3 to switch builds.")
+                log("  roughly 1-2s per photo. See README section 4 to switch builds.")
             else:
                 log("  PyTorch has CUDA support but no usable GPU was found - check")
                 log("  your NVIDIA driver with `nvidia-smi`. Running on CPU for now.")
@@ -1632,7 +1632,7 @@ AUTO_CALIBRATE_GROWTH = 0.10      # re-fit once the scored pool moves by 10%
 
 def run_calibrate(cache: "Cache", out_dir: Path) -> Optional[dict]:
     """
-    Derive normalisation ranges and band cutoffs from what this library actually
+    Derive normalization ranges and band cutoffs from what this library actually
     scored, then write them to calibration.json and apply them.
 
     The shipped defaults assume model outputs spread across a range they rarely
@@ -1700,7 +1700,7 @@ def run_calibrate(cache: "Cache", out_dir: Path) -> Optional[dict]:
     cal["_keepers_at_calibration"] = len(rows)
 
     # JSON has no comments, so the explanation goes in as data. Keys the script
-    # does not recognise are ignored by apply_calibration(), so this is inert -
+    # does not recognize are ignored by apply_calibration(), so this is inert -
     # it exists purely so the file explains itself when you open it in a year.
     described = {
         "_readme": [
@@ -2041,7 +2041,7 @@ def _score_one(img: Image.Image, res: PhotoResult, scorer, out_dir: Path,
         make_thumb(img, out_dir / "thumbs" / thumb_name(res.path))
 
     # --- Resolution is deliberately excluded from every measurement ---------
-    # Each image below is normalised to the SAME canvas - longest side exactly
+    # Each image below is normalized to the SAME canvas - longest side exactly
     # SCORING_SIZE - so that how many pixels a file happens to contain cannot
     # move its score. That is a policy, not an accident:
     #
@@ -2061,7 +2061,7 @@ def _score_one(img: Image.Image, res: PhotoResult, scorer, out_dir: Path,
     # The downscale path is byte-for-byte what earlier versions did, so scores
     # in an existing database do not shift. The upscale branch is new and only
     # ever runs on images smaller than the canvas; anything reaching here has
-    # already cleared MIN_IMAGE_EDGE, so it is at most a couple of per cent.
+    # already cleared MIN_IMAGE_EDGE, so it is at most a couple of percent.
     scoring = img
     if max(img.size) > SCORING_SIZE:
         scoring = img.copy()
@@ -2414,11 +2414,11 @@ def run_dedup(cache: Cache) -> int:
 
 def _to_url_path(p: str) -> str:
     """
-    Normalise a filesystem path into the path portion of a file:/// URL.
+    Normalize a filesystem path into the path portion of a file:/// URL.
 
     Done with plain string ops rather than pathlib on purpose: the report may be
     generated on one OS and the paths may use the other's separator, and
-    PurePath silently picks the wrong flavour when they disagree.
+    PurePath silently picks the wrong flavor when they disagree.
     """
     s = p.replace("\\", "/").lstrip("/")
     # Percent itself goes first, or the encodings added below would be encoded
@@ -2525,7 +2525,7 @@ HTML_TEMPLATE = r"""<!doctype html>
  .VIDEO    { background:#4a2a5c; color:#dcb0f5; margin-right:5px; }
  .note { color:#b6b6b6; font-size:12.5px; margin:6px 0 8px; }
  /* A named fault is the one part of the line that is not on every card, so it
-    is coloured to be scannable rather than read. */
+    is colored to be scannable rather than read. */
  .note .flag { color:#d9a441; }
  /* Two muted lines, split by how long each field can get. The folder is
     unbounded free text, so it takes a line to itself and truncates. The facts
@@ -2542,7 +2542,7 @@ HTML_TEMPLATE = r"""<!doctype html>
  .links a:hover { text-decoration:underline; }
 
  /* ---- tags ---------------------------------------------------------------
-    Colour comes from a hash of the tag text, so a tag looks the same on every
+    Color comes from a hash of the tag text, so a tag looks the same on every
     card and in the search box, and stays the same between sessions. */
  .tagwrap { margin:8px 0 2px; padding-top:8px; border-top:1px solid #2a2a2a; }
  .taglist { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
@@ -2666,7 +2666,7 @@ HTML_TEMPLATE = r"""<!doctype html>
  body.view-folders.folder-open #folders { display:none; }
  body.view-folders.folder-open main { display:grid; }
 
- /* flex-column rather than block: a button centres its contents vertically by
+ /* flex-column rather than block: a button centers its contents vertically by
     default, which leaves a gap above the mosaic on any tile shorter than its
     row and stops the covers lining up across the grid. */
  .fold { background:#1b1b1b; border:1px solid var(--fold-line);
@@ -2702,7 +2702,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     the images. A plain 1fr is minmax(auto,1fr), and that auto floor is the
     image's own min-content size - so one portrait photograph stretches its row
     to the full height of the photograph, the aspect-ratio is overruled, and
-    the tile grows to several times the height of its neighbours. Zeroing the
+    the tile grows to several times the height of its neighbors. Zeroing the
     floor is what lets object-fit:cover crop instead. */
  .mosaic { display:grid; gap:2px; aspect-ratio:3/2; overflow:hidden;
    background:#1b1b1b;
@@ -3060,9 +3060,9 @@ __CARDS__
                      .replace(/^[\s\-_]+|[\s\-_]+$/g, '').trim();
  }
 
- // Deterministic colour: the same text always gives the same hue, on every card
+ // Deterministic color: the same text always gives the same hue, on every card
  // and in the search box, across sessions. Multiplying by the golden angle
- // spreads similar strings far apart on the colour wheel.
+ // spreads similar strings far apart on the color wheel.
  function tagHue(name) {
    let h = 0;
    const t = name.toLowerCase();
@@ -3393,7 +3393,7 @@ __CARDS__
      if (key === 'score') r = va - vb;
      else if (!va && !vb) r = 0;
      // Undated or unfoldered items always sink to the bottom rather than
-     // clumping at whichever end the sort direction happens to favour.
+     // clumping at whichever end the sort direction happens to favor.
      else if (!va) return 1;
      else if (!vb) return -1;
      // Timestamps are 'YYYY-MM-DD HH:MM:SS', so a plain string comparison is
@@ -3561,7 +3561,7 @@ __CARDS__
  // In All photos: none of them.
  //
  // Removed and reinserted rather than hidden: `hidden` on an <option> is not
- // honoured everywhere, and a select that silently ignores it would offer an
+ // honored everywhere, and a select that silently ignores it would offer an
  // option that does nothing.
  const allSortOpts = [...sortSel.options];
  function syncSortOptions() {
@@ -3742,7 +3742,7 @@ __CARDS__
    stage.classList.remove('actual');
    stage.scrollTop = stage.scrollLeft = 0;
    lb.classList.add('open');
-   // Warm the neighbours so arrow-key paging feels instant.
+   // Warm the neighbors so arrow-key paging feels instant.
    [list[(idx + 1) % list.length], list[(idx - 1 + list.length) % list.length]]
      .forEach(n => { if (n && n.dataset.preview) new Image().src = n.dataset.preview; });
  }
@@ -3872,19 +3872,19 @@ def folder_group(folder: Optional[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# The folder tiles' colour scheme, worked out rather than chosen
+# The folder tiles' color scheme, worked out rather than chosen
 # ---------------------------------------------------------------------------
 
 DEFAULT_FOLDER_OUTLINE = "#b09468"
 
 # The tile keeps the page's own dark card; only its outline is manila. That
-# colour is measured against the card it sits on, because a line is the one
+# color is measured against the card it sits on, because a line is the one
 # thing on a tile that has no fallback - too dark and the folder shape simply
 # is not there.
 #
 # 3:1 is the WCAG bar for a non-text interface element, which is what a border
 # is. The shipped default lands near 6:1 - deliberately the same weight as the
-# muted grey the page already uses for dates and counts, so the outline reads
+# muted gray the page already uses for dates and counts, so the outline reads
 # as part of the same family rather than as a highlight.
 OUTLINE_MIN_CONTRAST = 3.0
 TILE_BG = "#1b1b1b"          # the tile's background, the same dark card in both reports
@@ -3918,7 +3918,7 @@ def contrast(a, b) -> float:
 
 
 def outline_ok(value: str) -> bool:
-    """Whether a --folder-outline value is a colour this can use at all."""
+    """Whether a --folder-outline value is a color this can use at all."""
     try:
         _hex_rgb(value)
     except ValueError:
@@ -3928,16 +3928,16 @@ def outline_ok(value: str) -> bool:
 
 def folder_palette(outline_hex: str) -> dict:
     """
-    Outline colour in, the tile's two line colours out.
+    Outline color in, the tile's two line colors out.
 
     Only the outline is yours to choose. The card behind it stays the page's
     own, so the tiles sit in the same family as every other panel on the page
-    and the text on them keeps the colours it has everywhere else - which is
-    what makes a coloured folder shape read as a folder rather than as a
-    coloured box.
+    and the text on them keeps the colors it has everywhere else - which is
+    what makes a colored folder shape read as a folder rather than as a
+    colored box.
 
-    A colour too dark to see against that card is lifted until it clears the
-    3:1 floor, measured on the quantised value rather than the floating-point
+    A color too dark to see against that card is lifted until it clears the
+    3:1 floor, measured on the quantized value rather than the floating-point
     one: rounding to eight bits per channel moves the ratio, and a line chosen
     at exactly 3.0 can land at 2.99 once it is a hex string.
     """
@@ -3948,7 +3948,7 @@ def folder_palette(outline_hex: str) -> dict:
 
     line = _rgb_hex(rgb)
     # Walk toward the light until the border is actually visible. Hue and
-    # saturation are left alone, so a lifted colour is recognisably the one
+    # saturation are left alone, so a lifted color is recognisably the one
     # that was asked for.
     while contrast(_hex_rgb(line), card) < OUTLINE_MIN_CONTRAST and light < 0.99:
         light = min(0.99, light + 0.01)
@@ -4135,7 +4135,7 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
                        f'{html.escape(strip_folder_date(name))} ({tops[name]})</option>')
 
     # Only tags for images actually in this report, so the shortlist variant
-    # doesn't ship the whole library's tags. Tag values are sanitised on the way
+    # doesn't ship the whole library's tags. Tag values are sanitized on the way
     # in; the keys are file paths and are not, so script_json does the escaping.
     keys = {r["path"] for r in rows}
     payload = {k: v for k, v in tags.items() if k in keys}
@@ -4488,7 +4488,7 @@ def main(argv=None) -> int:
 
     # This value is written into the report's stylesheet, so it is checked
     # before anything else happens rather than throwing from inside the
-    # report writer after a long scoring run. Nothing but a hex colour gets
+    # report writer after a long scoring run. Nothing but a hex color gets
     # through: folder_palette rebuilds the string from parsed numbers, so a
     # value carrying CSS of its own cannot survive the trip.
     if not outline_ok(args.folder_outline):

@@ -118,7 +118,7 @@ rep('<h1>Photo Scout &mdash; photograph quality</h1>',
     '(top picks &amp; strong only)</span></h1>')
 
 # Only the Maybe and Pass buttons go. "All" stays and remains the default, so
-# this report keeps the original exclusive-filter behaviour - All shows both
+# this report keeps the original exclusive-filter behavior - All shows both
 # bands, the other two narrow to one. Because the JS is untouched, this variant
 # stays as close to photo_scout.py as possible, which is the whole point: less
 # divergence means less to keep in sync.

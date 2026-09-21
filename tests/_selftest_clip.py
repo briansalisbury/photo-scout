@@ -8,7 +8,7 @@ which crashed on Brian's machine with:
 
     AttributeError: 'BaseModelOutputWithPooling' object has no attribute 'norm'
 
-This builds a real (randomly initialised) CLIPModel from config - no download - and
+This builds a real (randomly initialized) CLIPModel from config - no download - and
 runs the genuine transformers code path through clip_features().
 """
 import sys

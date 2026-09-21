@@ -84,7 +84,7 @@ check("a bare year is not mistaken for a date",
 
 print("\n=== the folder tile outline ===")
 # The tile keeps the page's own card; only the outline is chosen. So the thing
-# worth testing is not "this hex value" but "whatever colour goes in, the
+# worth testing is not "this hex value" but "whatever color goes in, the
 # folder shape is actually visible against that card".
 SWATCHES = [
     "#b09468",   # the default
@@ -111,7 +111,7 @@ check("a colour already bright enough is left exactly as given",
 check("and one too dark is lifted rather than rejected",
       pg.folder_palette("#3a2f1d")["line"] != "#3a2f1d",
       pg.folder_palette("#3a2f1d")["line"])
-# Lifting must not turn it into a different colour.
+# Lifting must not turn it into a different color.
 import colorsys as _cs                                             # noqa: E402
 _h_in = _cs.rgb_to_hls(*pg._hex_rgb("#3a2f1d"))[0]
 _h_out = _cs.rgb_to_hls(*pg._hex_rgb(pg.folder_palette("#3a2f1d")["line"]))[0]

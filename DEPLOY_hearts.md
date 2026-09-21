@@ -238,7 +238,7 @@ that terminal window. (`export` is not a PowerShell command and will silently do
 nothing.)
 
 `--key` is your Ghost Admin API key, which is a separate credential from the heart
-token above — README section 11, "Getting a Ghost Admin API key", covers where to
+token above — README section 12, "Getting a Ghost Admin API key", covers where to
 find it and how to pass it on each platform. It can equally be set as
 `GHOST_ADMIN_KEY`, which keeps both secrets off the command line.
 

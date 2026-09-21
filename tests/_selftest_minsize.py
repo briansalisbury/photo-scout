@@ -14,7 +14,7 @@ Two separate ideas that happen to share a subject:
 The second is the one that can rot silently: NIMA is handed pixels directly and
 its output moves with input size, and Laplacian variance rises with pixel count
 by construction. So the test below does not merely assert the invariant - it
-first demonstrates the failure mode that would exist without the normalisation,
+first demonstrates the failure mode that would exist without the normalization,
 then shows the pipeline is immune to it.
 """
 import contextlib, csv, io, re, shutil, sqlite3, sys

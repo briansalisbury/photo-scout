@@ -11,7 +11,7 @@ is named. Bugs belong in the issue tracker.
 ## Scoring
 
 **These are ranking tools, not judges.** No model knows which of your photographs
-is the good one. The three axes measure *components* of that judgement and combine
+is the good one. The three axes measure *components* of that judgment and combine
 them; the result is a triage aid for cutting thousands of photographs down to a few
 hundred worth your attention. Use your own eye from there, and don't delete anything
 on the strength of a `PASS`.
@@ -21,7 +21,7 @@ saturated, high-contrast, conventionally pretty images. It reliably under-rates
 subtle, minimalist and high-key work — which in fine-art landscape is often the
 strongest work in the folder. This is the single biggest caveat in the project.
 
-**Subject score saturates.** On a focused library CLIP recognises almost
+**Subject score saturates.** On a focused library CLIP recognizes almost
 everything as on-subject, so that axis pins near 100 and adds roughly the same
 constant to every photograph. It carries only 0.15 for that reason. It still does
 real work pushing snapshots and test frames down; it just cannot separate one good
@@ -40,7 +40,7 @@ defaults, which squash everything into the middle. Score a few folders first.
 
 **Resolution is excluded from the score by design**, which cuts both ways. A
 gorgeous 2 MP frame and a gorgeous 45 MP frame get the same number, so the report
-will happily put a photograph at the top that is too small for the licence you had
+will happily put a photograph at the top that is too small for the license you had
 in mind. The dimensions are printed on every card, in the lightbox and in the CSV
 precisely because the tool is refusing to make that call for you. Sort the CSV by
 `megapixels` if you need a hard cut-off.
@@ -68,7 +68,7 @@ reveal them.
 
 **RAW scoring uses the camera's embedded JPEG preview**, not a neutral demosaic.
 That is about 40x faster and irrelevant to ranking, but it means the score
-reflects your camera's rendering — its colour science, contrast curve and sharpening.
+reflects your camera's rendering — its color science, contrast curve and sharpening.
 Two bodies photographing the same scene will not score identically. Where a
 preview is missing or too small, it falls back to a half-resolution demosaic.
 
@@ -110,7 +110,7 @@ frame can and will outrank a RAW on the strength of the picture alone; the
 dimensions beside it are what tell you whether that matters. Clips under
 `--min-edge` are dropped whole.
 
-**`VIDEO_FRAME_PENALTY` is a judgement call, not a measurement.** The flat 6 points
+**`VIDEO_FRAME_PENALTY` is a judgment call, not a measurement.** The flat 6 points
 stand for 8-bit depth, chroma subsampling, inter-frame compression and motion blur —
 real deficits that a downscaled proxy hides from the models. Nobody has calibrated
 that number against licensing outcomes; it is sized to half a verdict band. Set it
@@ -214,7 +214,7 @@ them.
 **There is no CI.** The suites in `tests/` are run by hand before a release. See
 `CONTRIBUTING.md`.
 
-**Model weights are downloaded at first run and carry their own licences** — CLIP
+**Model weights are downloaded at first run and carry their own licenses** — CLIP
 from OpenAI, the LAION-Aesthetic head from LAION, NIMA via `pyiqa`. The GPL covers
 this project's code, not those. Check their terms before commercial use.
 

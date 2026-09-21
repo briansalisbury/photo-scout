@@ -3,8 +3,8 @@ Video-path verification. Generates real clips with ffmpeg, runs the full
 pipeline over a mixed photo+video library, and checks sampling, timestamp
 accuracy, frame dedup, full-resolution extraction, and v1->v2 DB migration.
 
-Each clip segment has a known solid colour and a white box in a known position,
-so an extracted still can be verified two ways: the colour proves the seek
+Each clip segment has a known solid color and a white box in a known position,
+so an extracted still can be verified two ways: the color proves the seek
 landed in the right segment, the box gives phash real structure to work with.
 """
 import contextlib, io, re, shutil, sqlite3, subprocess, sys
@@ -33,9 +33,9 @@ shutil.rmtree(OUTDIR, ignore_errors=True)
 ps.DEFAULT_OUT_DIR = OUTDIR
 
 W, H = 1280, 720
-SEG = 5.0                       # seconds per colour segment
+SEG = 5.0                       # seconds per color segment
 EVERY = 3.0                     # sampling interval under test
-SEGMENTS = [                    # (hex colour, box x, box y)
+SEGMENTS = [                    # (hex color, box x, box y)
     ("0xE02020", 100, 100),
     ("0x20C020", 500, 120),
     ("0x2040E0", 900, 300),
@@ -202,7 +202,7 @@ else:
     check("extracted stills are NATIVE resolution", True,
           f"all {len(extracted)} are {W}x{H} (scoring proxy was {ps.SCORING_SIZE}px)")
 
-# colour check proves the seek landed in the correct segment
+# color check proves the seek landed in the correct segment
 print("  seek accuracy (colour of extracted frame vs its segment):")
 acc_ok = True
 for r in sorted(extracted, key=lambda r: (r["source_video"], r["timestamp_s"])):

@@ -96,7 +96,7 @@ ORIGIN = f"http://127.0.0.1:{PORT}"
 LIB.mkdir(parents=True)
 rng = np.random.default_rng(11)
 # Enough photographs that the calibration bands actually produce a shortlist:
-# TOP PICK is the top 5 per cent, so a handful of images yields none at all.
+# TOP PICK is the top 5 percent, so a handful of images yields none at all.
 for folder, day in (("2011-06-28 - Wyoming", "2011:06:28"),
                     ("2010-03-12 - Arches", "2010:03:12")):
     d = LIB / folder; d.mkdir(parents=True)

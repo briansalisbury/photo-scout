@@ -1,5 +1,5 @@
 """
-Security behaviour: script-block escaping, the plaintext-HTTP refusal, and the
+Security behavior: script-block escaping, the plaintext-HTTP refusal, and the
 heart service's request limits and error reticence.
 
 Every check here corresponds to something in SECURITY.md. If one of them starts
@@ -239,7 +239,7 @@ else:
         check("and no page errors", not page_errors, "; ".join(page_errors[:2]))
         _br.close()
 
-# The tile colour is written into the stylesheet, so it is the other new way in.
+# The tile color is written into the stylesheet, so it is the other new way in.
 print("\n=== the folder outline cannot carry CSS ===")
 for bad in ("red;}body{display:none}.x{", "#b09468;}*{display:none", "</style>",
             "expression(alert(1))", ""):

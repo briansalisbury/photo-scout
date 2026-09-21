@@ -30,7 +30,7 @@ weaken that test to make a feature fit.
 
 ## Prove it, don't assert it
 
-Every behaviour worth relying on has a test that demonstrates it, and the tests are
+Every behavior worth relying on has a test that demonstrates it, and the tests are
 deliberately adversarial rather than confirmatory.
 
 Some examples of what that means here:

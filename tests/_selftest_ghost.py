@@ -3,7 +3,7 @@ Verifies photo_scout_ghost.py against a mock Ghost Admin API.
 
 The mock behaves like the real thing in the ways that matter: it mints
 date-based URLs the client cannot predict, and it deduplicates repeated
-filenames by appending -1, -2 exactly as Ghost does. That second behaviour is
+filenames by appending -1, -2 exactly as Ghost does. That second behavior is
 the trap the whole naming scheme exists to avoid, so the test asserts it never
 fires.
 """
@@ -79,7 +79,7 @@ class MockGhost(BaseHTTPRequestHandler):
         if self.path.startswith("/ghost/api/admin/images/upload"):
             m = re.search(rb'filename="([^"]+)"', raw)
             name = m.group(1).decode() if m else "unknown.jpg"
-            # Ghost's real deduplication behaviour.
+            # Ghost's real deduplication behavior.
             n = STATE["seen_filenames"].get(name, 0)
             STATE["seen_filenames"][name] = n + 1
             stored = name if n == 0 else re.sub(r"(\.\w+)$", f"-{n}\\1", name)

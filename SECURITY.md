@@ -16,7 +16,7 @@ Send a message there rather than opening a public issue. Include:
 - how to reproduce it, ideally with the smallest input that shows it,
 - what an attacker gets out of it.
 
-You should get an acknowledgement within a week. Once a fix is out, credit goes
+You should get an acknowledgment within a week. Once a fix is out, credit goes
 to you in the release notes unless you would rather it did not.
 
 Please do not test against anyone else's published gallery. A local install and
@@ -61,7 +61,7 @@ random token the browser mints and keeps in `localStorage`. Anyone can mint
 another one. Clearing browser storage loses your hearts; a script can inflate a
 count. This is a popularity signal on a photo gallery, not a ballot — the cost of
 real identity was not worth what it buys. Reports that amount to "the counts can
-be gamed" describe intended behaviour and are already in LIMITATIONS.md. A way to
+be gamed" describe intended behavior and are already in LIMITATIONS.md. A way to
 crash the service, exhaust its disk, or read the admin-only data through the
 public endpoints is a different matter and *is* in scope.
 

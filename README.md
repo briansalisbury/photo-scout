@@ -24,7 +24,7 @@ I hope you discover beautiful new things to look at.
 - Brian Salisbury - Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
-[Licence](#13-licence).
+[License](#14-license).
 
 ### Paths in this document
 
@@ -41,25 +41,25 @@ Quote any path containing spaces, on every platform.
 
 | | |
 |---|---|
-| [What AI does Photo Scout use?](#what-ai-does-photo-scout-use) | the models behind the scores |
-| [1. What it actually measures](#1-what-it-actually-measures) | the three scoring axes |
-| [2. The other things the script handles](#2-the-other-things-the-script-handles) | RAW, dedup, resume, the size floor |
-| [3. Install](#3-install) | requirements and setup |
-| [4. Use](#4-use) | commands and options |
-| [5. Output](#5-output) | the report and what else it writes |
-| [6. Honest limitations](#6-honest-limitations) | what this cannot do |
-| [7. Calibrating to your own library](#7-calibrating-to-your-own-library) | why scores need fitting |
-| [8. Video](#8-video) | clips in the same pass |
-| [9. Tagging](#9-tagging) | labelling in the browser |
-| [10. Hiding photographs](#10-hiding-photographs) | keeping work out of reports |
-| [11. Publishing to the web](#11-publishing-to-the-web) | the optional companion scripts |
-| [12. Troubleshooting](#12-troubleshooting) | errors whose cause is far from the symptom |
-| [13. Licence](#13-licence) | GPL-3.0-or-later |
-| [14. Contributing](#14-contributing) | tests, style, how to help |
+| [1. What AI does Photo Scout use?](#1-what-ai-does-photo-scout-use) | the models behind the scores |
+| [2. What it actually measures](#2-what-it-actually-measures) | the three scoring axes |
+| [3. The other things the script handles](#3-the-other-things-the-script-handles) | RAW, dedup, resume, the size floor |
+| [4. Install](#4-install) | requirements and setup |
+| [5. Use](#5-use) | commands and options |
+| [6. Output](#6-output) | the report and what else it writes |
+| [7. Honest limitations](#7-honest-limitations) | what this cannot do |
+| [8. Calibrating to your own library](#8-calibrating-to-your-own-library) | why scores need fitting |
+| [9. Video](#9-video) | clips in the same pass |
+| [10. Tagging](#10-tagging) | labeling in the browser |
+| [11. Hiding photographs](#11-hiding-photographs) | keeping work out of reports |
+| [12. Publishing to the web](#12-publishing-to-the-web) | the optional companion scripts |
+| [13. Troubleshooting](#13-troubleshooting) | errors whose cause is far from the symptom |
+| [14. License](#14-license) | GPL-3.0-or-later |
+| [15. Contributing](#15-contributing) | tests, style, how to help |
 
 ---
 
-## What AI does Photo Scout use?
+## 1. What AI does Photo Scout use?
 
 Photo Scout actually understands what is in the photograph. The current implementation has **three scoring axes**, two of which are explicitly neural-network/AI models and the third uses CLIP, which is also a neural network:
 
@@ -91,10 +91,10 @@ So, for example, it can effectively distinguish:
 
 ---
 
-## 1. What it actually measures
+## 2. What it actually measures
 
 There is no model that knows which of your photographs is the good one. What exists
-are models that measure *components* of that judgement, and the script combines three
+are models that measure *components* of that judgment, and the script combines three
 of them.
 
 ### Axis 1 — Aesthetic (weight 60%)
@@ -145,7 +145,7 @@ The subject score is how much of CLIP's confidence lands on target subjects vers
 distractors. A gorgeous, technically perfect photo of a parking lot scores high on
 axes 1 and 2 and gets pulled down here — which is correct.
 
-**Why this axis only carries 15%.** CLIP recognises almost any competent example of
+**Why this axis only carries 15%.** CLIP recognizes almost any competent example of
 a target subject as on-subject, so on a focused library the subject score saturates —
 on the library this was developed against, median 96.6 and 75th percentile 99.7. At a heavier weight it would add nearly the same constant to every
 photograph — good at pushing snapshots and test frames down, useless at separating
@@ -169,7 +169,7 @@ never scored](#resolution-is-reported-never-scored) below.
 Then banded into `TOP PICK` (78+), `STRONG` (66+), `MAYBE` (54+), `PASS`.
 
 **Those defaults are placeholders, and the script replaces them automatically.**
-At the end of a scoring run it fits the scale to your own library (section 7).
+At the end of a scoring run it fits the scale to your own library (section 8).
 Left uncalibrated they squash scores into the middle and starve the top band.
 
 All weights, thresholds, band cutoffs, and prompt lists are constants in a single
@@ -180,7 +180,7 @@ need a full re-run with `--force`.
 
 ---
 
-## 2. The other things the script handles
+## 3. The other things the script handles
 
 **RAW decoding, fast.** Every NEF contains a full-size JPEG preview that the camera
 generated. The script extracts that instead of demosaicing the Bayer sensor data —
@@ -190,7 +190,7 @@ is missing or too small. EXIF orientation is applied so portrait shots aren't
 scored sideways.
 
 **Near-duplicate collapsing.** Most libraries contain long runs — `DSC_0049` through
-`DSC_0081`, bracketed and burst frames of one composition. The script computes a 64-bit perceptual hash (a "difference hash": resize to 9x8 greyscale,
+`DSC_0081`, bracketed and burst frames of one composition. The script computes a 64-bit perceptual hash (a "difference hash": resize to 9x8 grayscale,
 emit one bit per horizontal brightness comparison), groups anything within 5 bits of
 another, and keeps only the highest-scoring frame as the group's representative.
 
@@ -262,11 +262,11 @@ That takes deliberate work, because two of the measurements leak resolution if y
 let them. NIMA is handed pixels directly and its output shifts with input size, so a
 45 MP body would quietly out-score a 12 MP one on identical scenes. Laplacian
 variance climbs with pixel count by construction, reporting "sharper" when it means
-"bigger". So every image is normalised to one fixed canvas — longest side 512px —
+"bigger". So every image is normalized to one fixed canvas — longest side 512px —
 before anything measures it. CLIP resizes to 224 internally and was always immune.
 
 The reasoning: resolution is a fact about the *file*, not a quality of the
-*photograph*. Whether 2.1 MP is enough depends on the licence you have in mind, and
+*photograph*. Whether 2.1 MP is enough depends on the license you have in mind, and
 that is your call, not a model's. So the dimensions are put in front of you instead —
 on every card, in the lightbox, and as `width`, `height` and `megapixels` columns in
 the CSV — while the models go on judging what they are actually good at: composition,
@@ -278,11 +278,11 @@ no recorded size counts as unknown, and unknown is never treated as too small.
 
 **Hiding photographs you don't want scored or shown.** Name a folder
 `hide_from_photo_scout` anywhere in the library and everything inside it — at any
-depth — is left out. See §10 below.
+depth — is left out. See §11 below.
 
 ---
 
-## 3. Install
+## 4. Install
 
 **Requirements**
 
@@ -379,7 +379,7 @@ republishes the checkpoint legitimately, `PHOTO_SCOUT_LAION_SHA256` overrides th
 digest without editing the script.
 
 On Windows, prefer python.org over the Microsoft Store build: the Store version is
-sandboxed and causes odd file-permission behaviour with large libraries.
+sandboxed and causes odd file-permission behavior with large libraries.
 
 Verify your install — this reports the truth and never throws:
 
@@ -421,7 +421,7 @@ Version" in its header is the highest your driver supports, so pick an index at 
 below it (`cu126`, `cu128`, `cu130`, …). PyTorch bundles its own CUDA runtime, so
 you do **not** need the CUDA Toolkit installed — only a current NVIDIA driver.
 
-If `nvidia-smi` isn't recognised at all, there's no NVIDIA driver present, and CPU
+If `nvidia-smi` isn't recognized at all, there's no NVIDIA driver present, and CPU
 is the right answer — see the note below.
 
 The script runs fine on CPU, just slower — roughly 1–2 hours for 3,500 photographs
@@ -434,7 +434,7 @@ everything after is fully offline.
 
 ---
 
-## 4. Use
+## 5. Use
 
 Run from the project directory with the virtual environment active. Output lands in
 `_photo_scout/` beside the script; the library is only ever read.
@@ -468,7 +468,7 @@ Ctrl+C any time. The same command resumes.
 | `--reset` | Delete all previous results and start over (see below) |
 | `--yes` | Skip the `--reset` confirmation |
 | `--report-only` | Rebuild the reports from the database, score nothing |
-| `--calibrate` | Force a re-fit of the score scale now (normally automatic — see section 7) |
+| `--calibrate` | Force a re-fit of the score scale now (normally automatic — see section 8) |
 | `--no-calibrate` | Don't calibrate automatically after scoring |
 | `--recompute` | Rebuild scores from cached model outputs after editing weights or bands |
 | `--no-previews` | Skip the large JPEGs the lightbox displays (saves ~900 MB) |
@@ -476,7 +476,7 @@ Ctrl+C any time. The same command resumes.
 | `--no-thumbs` | Skip contact-sheet thumbnails (smaller output, less useful report) |
 | `--min-edge 800` | Raise the size floor (default 500px on the shorter side); `0` scores everything |
 | `--no-dedup` | Don't group near-duplicates |
-| `--no-video` | Stills only; ignore video files (see section 8) |
+| `--no-video` | Stills only; ignore video files (see section 9) |
 | `--video-every 1.5` | Sample video frames every 1.5s instead of 3.0 |
 | `--no-extract` | Score video frames but don't export full-resolution stills |
 | `--device cpu` | Force CPU |
@@ -541,7 +541,7 @@ Either way it is one-time, free, and resumable.
 
 ---
 
-## 5. Output
+## 6. Output
 
 Everything lands in `_photo_scout/` beside the script (override with `--out`):
 
@@ -555,7 +555,7 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
   MAYBE / PASS, a checkbox to reveal near-duplicates, and a search box for folder
   or filename. Under each thumbnail the folder takes one line and the capture date,
   time and pixel dimensions the next — dimensions because resolution is deliberately
-  excluded from the score, so the judgement is yours, and on a separate line because
+  excluded from the score, so the judgment is yours, and on a separate line because
   a long folder name would otherwise crowd them off. Only the folder is ever
   shortened, with the full name on hover. All client-side — just double-click it.
 - **`shortlist.csv`** — only the TOP PICK and STRONG keepers. This is the file to
@@ -565,9 +565,9 @@ Everything lands in `_photo_scout/` beside the script (override with `--out`):
 - **`thumbs/`** — the 400px thumbnails in the report grid.
 - **`previews/`** — the 1600px JPEGs the lightbox displays, rendered from the RAWs.
 - **`extracted_stills/`** — full-resolution frames pulled out of video clips, one
-  subfolder per clip. Only created if the library contains video (see section 8).
+  subfolder per clip. Only created if the library contains video (see section 9).
 - **`calibration.json`** — the score scale fitted to this library. The file explains
-  itself when you open it (see section 7). Written automatically and specific to
+  itself when you open it (see section 8). Written automatically and specific to
   your photographs, so it is not worth committing.
 - **`tags.json`** — your tags. Hand-authored, so `--reset` preserves it.
 
@@ -614,7 +614,7 @@ folder there is no **Folder A–Z / Z–A**, every photograph in there sharing i
 The folder picker in the toolbar is put away in the folder view — the tiles are
 the folders — and comes back in **All photos**, where it is the only way to
 narrow to one. `--view all` builds a report that opens flat, and
-`--folder-outline "#b09468"` changes the tile colour; a colour too dark to see
+`--folder-outline "#b09468"` changes the tile color; a color too dark to see
 against the card is lifted, keeping its hue, until it clears the 3:1 contrast
 floor a border needs to be visible at all.
 
@@ -668,7 +668,7 @@ matcher saw:
 
 > Aesthetic 81 · Technical 74 · Golden-hour mountain peaks
 
-If the photograph trips one of the quality checks, that is appended and coloured,
+If the photograph trips one of the quality checks, that is appended and colored,
 since it is the only part of the line that is not on every card:
 
 > Aesthetic 34 · Technical 12 · A test shot · **looks soft or out of focus**
@@ -679,7 +679,7 @@ VIDEO chip. Restating them made every card read like every other one.
 
 ---
 
-## 6. Honest limitations
+## 7. Honest limitations
 
 Everything this tool cannot do, gets wrong, or does only approximately lives in
 one place: **[LIMITATIONS.md](LIMITATIONS.md)**. Read it before you rely on the
@@ -699,7 +699,7 @@ The two that matter most:
 
 ---
 
-## 7. Calibrating to your own library
+## 8. Calibrating to your own library
 
 **This happens by itself.** At the end of any scoring run the script fits the
 score scale to your library — you don't have to run anything. It loads no models
@@ -727,7 +727,7 @@ good it was.
 the observed 2nd–99th percentile across 0–100, and then sets the band cutoffs by
 percentile of the result: **top 5% TOP PICK, next 15% STRONG, next 30% MAYBE,
 bottom half PASS**. It writes `calibration.json` and every later run
-honours it, so newly scored folders are judged on the same scale.
+honors it, so newly scored folders are judged on the same scale.
 
 Change the proportions by editing `BAND_QUANTILES` in the script and re-running
 `--calibrate`. Delete `calibration.json` to return to the defaults.
@@ -756,7 +756,7 @@ see* — the subject prompt lists, `SCORING_SIZE` — require a real re-run with
 
 `subject_score` saturates. In that first run its median was 96.6 and its 75th
 percentile 99.7, because the CLIP softmax uses a sharp temperature that makes the
-subject match nearly binary. For anything recognisably a landscape it pins near
+subject match nearly binary. For anything recognizably a landscape it pins near
 100, so that 30% of the composite is close to a constant and contributes little
 discrimination *between* your good photographs — though it still does real work
 pushing snapshots and test frames down.
@@ -772,7 +772,7 @@ it's instant and reversible.
 
 ---
 
-## 8. Video
+## 9. Video
 
 Video is built into the script — not a separate command, not a separate pass. The
 walker picks up `.mp4 .mov .m4v .avi .mkv .mts .m2ts .wmv .mpg .mpeg` alongside
@@ -899,14 +899,14 @@ which costs one header read per clip and no scoring at all.
 
 ---
 
-## 9. Tagging
+## 10. Tagging
 
 Every card has a text box under it. Type a word or phrase and press **Enter** or
 type a **comma** to turn it into a tag. Multi-word tags like `Lake Photos` work.
 Clicking away commits whatever you were typing, so a half-finished tag isn't lost.
 
-Each tag gets its own colour, derived from a hash of its text. The same tag is
-therefore the same colour on every card, in the search box, and between sessions.
+Each tag gets its own color, derived from a hash of its text. The same tag is
+therefore the same color on every card, in the search box, and between sessions.
 
 Only letters, digits, spaces, underscores and hyphens survive; everything else is
 stripped as you type. That keeps tags safe to render — with no angle brackets or
@@ -917,7 +917,7 @@ enforced again in Python when reading `tags.json`, since that file is editable.
 
 Click the search box and a dropdown lists every tag in use, with a count of how
 many photographs carry it. Typing filters that list live. Click a tag, or use the
-arrow keys and Enter, and it becomes a coloured chip in the search box.
+arrow keys and Enter, and it becomes a colored chip in the search box.
 
 Multiple chips are **ORed** — a photo shows if it carries *any* of them. Picking
 `Lake` and `Desert` gives you both sets, even when no single photograph has both
@@ -948,7 +948,7 @@ tagged in the shortlist report too.
 
 ---
 
-## 10. Hiding photographs
+## 11. Hiding photographs
 
 Some photographs should not be scored, shortlisted, or published — client work,
 family pictures, anything that is not yours to license. Rather than moving them
@@ -1031,7 +1031,7 @@ Ghost admin if that matters to you.
 
 ---
 
-## 11. Publishing to the web
+## 12. Publishing to the web
 
 Two optional companions, neither required to use the scorer:
 
@@ -1101,7 +1101,7 @@ python photo_scout_ghost.py --site https://example.com --key "<id>:<secret>"
 Three PowerShell specifics worth knowing:
 
 - **`export` does not exist.** `export GHOST_ADMIN_KEY=...` is a bash-ism; PowerShell
-  will not recognise it and the variable will simply never be set.
+  will not recognize it and the variable will simply never be set.
 - **The variable lasts only as long as that terminal window.** Open a new one, or
   reboot, and you have to set it again. To make it permanent for your user account:
   `[Environment]::SetEnvironmentVariable("GHOST_ADMIN_KEY", "<id>:<secret>", "User")`
@@ -1124,7 +1124,7 @@ python photo_scout_ghost.py --site https://example.com --dry-run --emit-html pre
 ```
 
 If the key is wrong you will get `Admin API key must look like <id>:<hex secret>`
-before anything is uploaded — see [section 12](#12-troubleshooting).
+before anything is uploaded — see [section 13](#13-troubleshooting).
 
 ### Folder galleries
 
@@ -1157,10 +1157,10 @@ every photograph in there shares it. All photos offers the lot.
 
 Tiles are drawn as folders — a tab on the left, the covers inset so the card
 shows around them. The card itself is the same dark panel as every other card
-on the page; only the folder shape is coloured, in a manila tan pitched at the
-same weight as the muted grey already used for dates and counts, so it reads as
+on the page; only the folder shape is colored, in a manila tan pitched at the
+same weight as the muted gray already used for dates and counts, so it reads as
 part of the same family rather than as a highlight. `--folder-outline "#b09468"`
-changes it, and a colour too dark to see against that panel is lifted — keeping
+changes it, and a color too dark to see against that panel is lifted — keeping
 its hue — until it clears the 3:1 floor a border needs to be visible at all. Where a heart
 service is running, a tile also carries that folder's total likes, and shows
 nothing at all when it has none.
@@ -1217,7 +1217,7 @@ inherits whatever spacing your theme gives its content. Three flags adjust the f
 | `--max-width 1800` | How wide the grid may grow, in pixels |
 | `--column-width 260` | Minimum column width; smaller means more columns |
 | `--view all` | Open the gallery flat, every photograph on one page, instead of on the folder index. A visitor can switch either way whatever this is set to |
-| `--folder-outline "#b09468"` | Outline colour of the folder tiles. The tiles keep the page's own background; a colour too dark to see against it is lifted until it is |
+| `--folder-outline "#b09468"` | Outline color of the folder tiles. The tiles keep the page's own background; a color too dark to see against it is lifted until it is |
 | `--insecure-http` | Allow a plain `http://` site or heart endpoint. Refused by default: the Admin API key is full write access to your site, and http puts it on the wire in the clear. Loopback addresses are exempt without the flag |
 
 A page still needs a name in Ghost's admin list, so when `--title` is blank it is
@@ -1231,7 +1231,7 @@ Both spacing flags reach slightly outside the gallery itself, so they are scoped
 to pages that actually carry one: the script marks the document with a
 `psc-host` class and its rules are written against that. No other page on your
 site changes, and a theme whose heading uses class names the script does not
-recognise simply keeps its own spacing.
+recognize simply keeps its own spacing.
 
 `hearts/` is a small optional service that lets visitors "like" photographs on the
 published page, with the tallies stored in SQLite beside your site rather than
@@ -1242,7 +1242,7 @@ documents the design and its trade-offs.
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 Failures whose cause is a long way from where the error appears.
 
@@ -1268,7 +1268,7 @@ instead, which always reports the truth:
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
 ```
 
-Section 3 covers the Windows CUDA-wheel trap that usually causes it.
+Section 4 covers the Windows CUDA-wheel trap that usually causes it.
 
 ### CLIP imports, but every score looks like nonsense
 
@@ -1288,7 +1288,7 @@ which squash everything together. Score a few more folders, or force a fit:
 python photo_scout.py --root /path/to/photos --calibrate
 ```
 
-Also expect composites to top out around **70–75, not 100** — section 7 explains why.
+Also expect composites to top out around **70–75, not 100** — section 8 explains why.
 
 ### Package files being scored as photographs
 
@@ -1320,7 +1320,7 @@ The environment variable is not set **in the terminal you are running from**. It
 does not travel between windows, and it does not survive a reboot. In PowerShell
 note that `export` silently does nothing — the syntax is
 `$env:GHOST_ADMIN_KEY = "<id>:<secret>"`. See
-[section 11](#getting-a-ghost-admin-api-key) for making it permanent, and for
+[section 12](#getting-a-ghost-admin-api-key) for making it permanent, and for
 checking whether it is set without printing the secret.
 
 ### Uploads to Ghost fail with `error code: 1010`
@@ -1349,7 +1349,7 @@ HEARTS_ADMIN_TOKEN="<token>" python photo_scout_ghost.py \
 
 ---
 
-## 13. Licence
+## 14. License
 
 Copyright (C) 2026 Brian Salisbury and contributors.
 
@@ -1375,18 +1375,18 @@ here:
 | LAION-Aesthetic V2 predictor head | LAION |
 | NIMA | via `pyiqa`, optional |
 
-Check their licences yourself before using this commercially.
+Check their licenses yourself before using this commercially.
 
 ### And a word on the output
 
 Scores are a triage aid, not a verdict on a photograph. They rank pictures against
 each other on aesthetic and technical quality; they do not know what a photograph is
-worth, and they are not a substitute for your own eye. Section 6 is honest about
+worth, and they are not a substitute for your own eye. Section 7 is honest about
 what these models can and cannot see.
 
 ---
 
-## 14. Contributing
+## 15. Contributing
 
 Contributions are welcome — bug reports especially, since most of the interesting
 faults in this project were found by someone running it against a real library.

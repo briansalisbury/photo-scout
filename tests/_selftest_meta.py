@@ -91,7 +91,7 @@ def jpeg_with_date(path, iso_dt, size=(600, 400)):
     exif = im.getexif()
     sub = exif.get_ifd(0x8769)
     sub[36867] = iso_dt                    # DateTimeOriginal
-    exif[306] = "2001:01:01 00:00:00"      # DateTime: must be IGNORED in favour of the above
+    exif[306] = "2001:01:01 00:00:00"      # DateTime: must be IGNORED in favor of the above
     im.save(path, "JPEG", quality=88, exif=exif)
 
 TMP = Path("/tmp/meta_probe"); shutil.rmtree(TMP, ignore_errors=True); TMP.mkdir()

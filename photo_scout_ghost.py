@@ -22,7 +22,7 @@ it as GHOST_ADMIN_KEY instead of passing --key to keep it out of shell history:
     PowerShell  $env:GHOST_ADMIN_KEY = "<id>:<secret>"
 
 'export' does not exist in PowerShell, and either form lasts only for that
-terminal session. README section 11 covers making it permanent.
+terminal session. README section 12 covers making it permanent.
 
 Reads scores.sqlite3 READ-ONLY. Never modifies the photo library, and never
 modifies Ghost's own database - everything goes through the documented Admin API.
@@ -150,7 +150,7 @@ def photo_id_for(rel_path: str) -> str:
     """
     Stable 16-hex-character public identifier for a photograph.
 
-    Normalised to forward slashes and lower case so a Windows-scored library and
+    Normalized to forward slashes and lower case so a Windows-scored library and
     a Linux-scored one produce identical ids for the same photograph.
     """
     norm = rel_path.replace("\\", "/").strip("/").lower()
@@ -608,7 +608,7 @@ def publish_images(client: Optional[GhostClient], manifest: Manifest,
 _HOST_HEADER = ":is(.article-header,.gh-article-header,.post-full-header,.gh-canvas>.post-full-header)"
 _HOST_TITLE = ":is(.article-title,.gh-article-title,.post-full-title,.page-title)"
 
-# The folder tiles' colour scheme lives in photo_scout, so the published
+# The folder tiles' color scheme lives in photo_scout, so the published
 # page and the local report cannot drift apart on it.
 DEFAULT_FOLDER_OUTLINE = ps.DEFAULT_FOLDER_OUTLINE
 OUTLINE_MIN_CONTRAST = ps.OUTLINE_MIN_CONTRAST
@@ -649,7 +649,7 @@ GALLERY_CSS = """
    out of that column and size against the viewport instead.
    96vw rather than 100vw: 100vw includes the vertical scrollbar, which would
    push the page into horizontal overflow. */
-/* Centred with a negative margin, deliberately NOT with translateX(-50%).
+/* Centered with a negative margin, deliberately NOT with translateX(-50%).
    Any ancestor carrying a transform (or filter, perspective, will-change,
    contain) becomes the containing block for position:fixed descendants - which
    would make the lightbox position against this div instead of the viewport,
@@ -828,7 +828,7 @@ __HEADCSS__
    Two buttons welded into one control, so they read as a pair of states rather
    than two unrelated actions. The active one picks up .on from the bar's own
    rule, which is more specific than anything here and so stays in charge of
-   the colour. */
+   the color. */
 .psc-views{display:inline-flex}
 .psc-views button{border-radius:0;margin:0}
 .psc-views button:first-child{border-radius:6px 0 0 6px}
@@ -837,7 +837,7 @@ __HEADCSS__
 .psc-views button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
 .psc-views button.on{position:relative;z-index:1}
 
-/* Each group of toggles has its own colour when active, so a glance tells you
+/* Each group of toggles has its own color when active, so a glance tells you
    which view you are in, which rating band is on, and whether Liked is
    filtering - rather than one green for all three questions. Manila for the
    view, matching the folder tiles; the familiar green for the bands; rose for
@@ -847,9 +847,9 @@ __HEADCSS__
 
 /* The index shares the photo grid's column track, so a tile is exactly as wide
    as a card and the two views line up when you switch between them. */
-/* Only the outline is coloured, and it comes from --folder-outline via
+/* Only the outline is colored, and it comes from --folder-outline via
    folder_palette(). The card behind it is the page's own, so the tiles sit in
-   the same family as every other panel and the text on them keeps the colours
+   the same family as every other panel and the text on them keeps the colors
    it has everywhere else. Change the flag, not this. */
 .psc-folders{display:none;grid-gap:14px;gap:14px;--psc-tab:13px;
   --psc-fold-line:__FOLDLINE__;--psc-fold-line-hover:__FOLDLINEHOVER__;
@@ -867,7 +867,7 @@ __HEADCSS__
    pseudo-element rather than markup, so the tile stays one button with one
    label and nothing extra for a screen reader to read out.
 
-   flex-column rather than block: a button centres its contents vertically by
+   flex-column rather than block: a button centers its contents vertically by
    default, which leaves a gap above the mosaic on any tile shorter than its
    row and stops the covers lining up across the grid. */
 .psc-fold{background:var(--psc-card);border:1px solid var(--psc-fold-line);
@@ -904,7 +904,7 @@ __HEADCSS__
    the images. A plain 1fr is minmax(auto,1fr), and that auto floor is the
    image's own min-content size - so one portrait photograph stretches its row
    to the full height of the photograph, the aspect-ratio above is overruled,
-   and the tile grows to several times the height of its neighbours. Zeroing
+   and the tile grows to several times the height of its neighbors. Zeroing
    the floor is what lets object-fit:cover crop instead. */
 /* The gap and the loading placeholder are the tile's own card showing between
    the prints, rather than black, so the four read as four rather than as one
@@ -1647,7 +1647,7 @@ GALLERY_JS = r"""
       if (key === 'score' || key === 'hearts') r = va - vb;
       else if (!va && !vb) r = 0;
       // Undated or unfoldered photographs always sink to the bottom rather
-      // than clumping at whichever end the direction happens to favour.
+      // than clumping at whichever end the direction happens to favor.
       else if (!va) return 1;
       else if (!vb) return -1;
       // Timestamps are 'YYYY-MM-DD HH:MM:SS', so a plain string comparison is
@@ -1868,7 +1868,7 @@ GALLERY_JS = r"""
   // All photos, where photographs really do span folders.
   //
   // Removed and reinserted rather than hidden: `hidden` on an <option> is not
-  // honoured everywhere, and a select that silently ignores it would show an
+  // honored everywhere, and a select that silently ignores it would show an
   // option that does nothing.
   var allSortOpts = sortSel ? [].slice.call(sortSel.options) : [];
   // Each view drops the orderings that say nothing in it.
@@ -2204,7 +2204,7 @@ GALLERY_JS = r"""
     var many = order.length > 1;
     navPrev.style.display = many ? 'flex' : 'none';
     navNext.style.display = many ? 'flex' : 'none';
-    [-1, 1].forEach(function(d){          // warm the neighbours
+    [-1, 1].forEach(function(d){          // warm the neighbors
       var n = DATA[order[(cur + d + order.length) % order.length]];
       if (n) { var im = new Image(); im.src = n.pv || n.th || ''; }
     });
@@ -2325,8 +2325,8 @@ GALLERY_JS = r"""
   navNext.addEventListener('click', function(e){ e.stopPropagation(); step(1); });
   lb.querySelector('.x').addEventListener('click', function(e){
     e.stopPropagation(); navCloseLb(); });
-  // overflow:hidden on html/body is not reliably honoured for wheel scrolling,
-  // so the gesture is cancelled at source while the overlay is open. Needs
+  // overflow:hidden on html/body is not reliably honored for wheel scrolling,
+  // so the gesture is canceled at source while the overlay is open. Needs
   // passive:false or preventDefault is ignored.
   function blockScroll(e){ if (lb.classList.contains('open')) e.preventDefault(); }
   lb.addEventListener('wheel', blockScroll, {passive: false});
@@ -2380,7 +2380,7 @@ GALLERY_JS = r"""
     // A name with no Latin letters at all still needs a link.
     return s || encodeURIComponent(String(name).toLowerCase());
   }
-  // The key a link is matched on. Encoding is normalised, so a link survives a
+  // The key a link is matched on. Encoding is normalized, so a link survives a
   // browser or a chat app re-encoding it on the way.
   function linkKey(raw){
     try { return encodeURIComponent(decodeURIComponent(raw)).toLowerCase(); }
@@ -2585,7 +2585,7 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
             # numbers: the browser would only ever format it this one way.
             "r": it.get("resolution") or "",
             # The facts, and separately any named fault, which the page
-            # colours so it can be scanned rather than read.
+            # colors so it can be scanned rather than read.
             "note": note_main,
             **({"w": note_flag} if note_flag else {}),
             # local=True renders straight from the files beside this page, so a

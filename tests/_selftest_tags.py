@@ -1,7 +1,7 @@
 """
-Tagging verification: Python-side sanitising and loading, the payload baked into
+Tagging verification: Python-side sanitizing and loading, the payload baked into
 the report, CSV export, --reset preservation, and the presence/consistency of the
-browser-side machinery (colours, chips, dropdown, filtering).
+browser-side machinery (colors, chips, dropdown, filtering).
 """
 import io, contextlib, json, re, shutil, sys
 from pathlib import Path

@@ -27,7 +27,7 @@ ps.DEFAULT_OUT_DIR = OUTDIR
 
 def synth(seed, size=(900, 600), blur=0):
     rng = np.random.default_rng(seed)
-    # low-frequency colour field + noise = something with real edge structure
+    # low-frequency color field + noise = something with real edge structure
     base = rng.integers(0, 255, (8, 12, 3), dtype=np.uint8)
     img = Image.fromarray(base).resize(size, Image.BICUBIC)
     noise = Image.fromarray(rng.integers(0, 90, (size[1], size[0], 3), dtype=np.uint8))
@@ -160,7 +160,7 @@ ncards = h.count('class="card')
 check("html card count matches", ncards == len(made), f"{ncards} cards")
 check("no unreplaced placeholders", "__CARDS__" not in h and "__STATS__" not in h)
 
-# resume behaviour: second run must score nothing new
+# resume behavior: second run must score nothing new
 import io, contextlib
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
