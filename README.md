@@ -11,14 +11,17 @@ technical quality, aesthetics, and configurable subject matter preferences
 assessment and scoring application for a large photo or video library to 
 quickly narrow down top-rated stills. 
 
-The report can be uploaded as a photo gallery to any [Ghost CMS](https://ghost.org) 
-implementation that permits API access, and it optionally features a 
+Set it to process a library of photos and video and return to an organized 
+gallery of your highest scored media. It's resumable; halt with Ctrl+C and
+repeat the previous command when ready to pick up where you left off.
+
+The report can also be uploaded as a photo gallery to any [Ghost CMS](https://ghost.org) 
+implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
-Point it at a library, walk away, come back to a single report: every photograph
-scored, near-duplicate frames collapsed, one line of plain-language feedback each,
-and a link straight into your file manager. Scoring is resumable — stop it with
-Ctrl+C and the same command picks up where it left off.
+I hope you discover beautiful new things to look at.
+
+- Brian Salisbury - Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
 [Licence](#13-licence).
