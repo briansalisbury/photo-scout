@@ -608,6 +608,18 @@ def publish_images(client: Optional[GhostClient], manifest: Manifest,
 _HOST_HEADER = ":is(.article-header,.gh-article-header,.post-full-header,.gh-canvas>.post-full-header)"
 _HOST_TITLE = ":is(.article-title,.gh-article-title,.post-full-title,.page-title)"
 
+# The folder tiles' colour scheme lives in photo_scout, so the published
+# page and the local report cannot drift apart on it.
+DEFAULT_FOLDER_OUTLINE = ps.DEFAULT_FOLDER_OUTLINE
+OUTLINE_MIN_CONTRAST = ps.OUTLINE_MIN_CONTRAST
+TILE_BG = ps.TILE_BG
+contrast = ps.contrast
+folder_palette = ps.folder_palette
+_hex_rgb = ps._hex_rgb
+_rgb_hex = ps._rgb_hex
+_relative_luminance = ps._relative_luminance
+
+
 TITLE_SIZE_CSS = {
     "keep": "",
     "compact": (
@@ -762,6 +774,12 @@ __HEADCSS__
   background:rgba(0,0,0,.94);z-index:2147483000;display:none;
   align-items:center;justify-content:center}
 .psc-lb.open{display:flex}
+/* The overlay and the toast are moved out to <body>, beyond the gallery, so
+   they would otherwise take the theme's font - a serif, on many themes. They
+   get the gallery's own instead; buttons do not inherit a font by default. */
+.psc-lb{font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif}
+.psc-toast{font-family:-apple-system,Segoe UI,Roboto,sans-serif}
+.psc-lb button,.psc-toast button{font-family:inherit}
 .psc-lb img{max-width:96vw;max-height:92vh;max-height:92dvh;object-fit:contain}
 .psc-lb .x{position:absolute;top:14px;right:20px;color:#ddd;font-size:30px;cursor:pointer;
   background:none;border:none;z-index:2}
@@ -800,12 +818,132 @@ __HEADCSS__
   .psc-bar input,.psc-bar select,.psc-bar .psc-q{font-size:16px}
 }
 
+/* ---- folder galleries --------------------------------------------------
+   Two buttons welded into one control, so they read as a pair of states rather
+   than two unrelated actions. The active one picks up .on from the bar's own
+   rule, which is more specific than anything here and so stays in charge of
+   the colour. */
+.psc-views{display:inline-flex}
+.psc-views button{border-radius:0;margin:0}
+.psc-views button:first-child{border-radius:6px 0 0 6px}
+.psc-views button:last-child{border-radius:0 6px 6px 0;border-left-width:0}
+
+/* The index shares the photo grid's column track, so a tile is exactly as wide
+   as a card and the two views line up when you switch between them. */
+/* Only the outline is coloured, and it comes from --folder-outline via
+   folder_palette(). The card behind it is the page's own, so the tiles sit in
+   the same family as every other panel and the text on them keeps the colours
+   it has everywhere else. Change the flag, not this. */
+.psc-folders{display:none;grid-gap:14px;gap:14px;--psc-tab:13px;
+  --psc-fold-line:__FOLDLINE__;--psc-fold-line-hover:__FOLDLINEHOVER__;
+  /* The tab hangs above each tile, so the rows need that much more between
+     them or the tab of one row overlaps the tile above it. */
+  row-gap:calc(14px + var(--psc-tab));
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--psc-colw)),1fr))}
+.psc-view-folders .psc-folders{display:grid}
+.psc-view-folders .psc-grid{display:none}
+/* Inside a folder the index goes away and the ordinary grid comes back. */
+.psc-view-folders.psc-open .psc-folders{display:none}
+.psc-view-folders.psc-open .psc-grid{display:grid}
+
+/* Shaped like a folder: a tab up on the left, then the body. The tab is a
+   pseudo-element rather than markup, so the tile stays one button with one
+   label and nothing extra for a screen reader to read out.
+
+   flex-column rather than block: a button centres its contents vertically by
+   default, which leaves a gap above the mosaic on any tile shorter than its
+   row and stops the covers lining up across the grid. */
+.psc-fold{background:var(--psc-card);border:1px solid var(--psc-fold-line);
+  border-radius:0 10px 10px 10px;cursor:pointer;text-align:left;
+  padding:0;color:inherit;font:inherit;width:100%;position:relative;
+  margin-top:var(--psc-tab);
+  display:flex;flex-direction:column;align-items:stretch}
+/* The tab ends exactly where the body's top edge does, covering that edge so
+   the two read as one piece of card. border-box, so the height means the same
+   thing whatever box-sizing rule the theme applies to everything: any taller
+   and the tab's side lines run on into the body. */
+.psc-fold::before{content:'';position:absolute;left:-1px;top:calc(-1px - var(--psc-tab));
+  width:46%;max-width:150px;box-sizing:border-box;height:calc(var(--psc-tab) + 1px);
+  background:var(--psc-card);border:1px solid var(--psc-fold-line);
+  border-bottom:none;border-radius:8px 8px 0 0;
+  /* One more pixel of card below the tab, inset from its side lines. At a zoom
+     that is not a whole number the tab's edge rounds to a pixel boundary and
+     can stop a fraction short of covering the line beneath it; this covers
+     that fraction without lengthening the tab's own sides. */
+  box-shadow:0 2px 0 -1px var(--psc-card)}
+/* Inset, so a margin of the folder's own card shows around the photographs and
+   they read as prints sitting inside it rather than as the folder itself. The
+   overflow has to live here rather than on the tile: on the tile it would clip
+   the tab away. */
+.psc-fold > .psc-mosaic{margin:6px 6px 0;border-radius:5px;overflow:hidden}
+/* Only the edge catches the light. Lifting the whole card would make the tile
+   flash, which is a lot of movement for a hover. */
+.psc-fold:hover,.psc-fold:hover::before{border-color:var(--psc-fold-line-hover)}
+.psc-fold:focus-visible{outline:2px solid #3f8f68;outline-offset:2px}
+/* Four thumbnails in one tile, on the same 3:2 footprint a single card image
+   uses.
+
+   minmax(0,1fr) rather than 1fr on every track, and min-width/min-height:0 on
+   the images. A plain 1fr is minmax(auto,1fr), and that auto floor is the
+   image's own min-content size - so one portrait photograph stretches its row
+   to the full height of the photograph, the aspect-ratio above is overruled,
+   and the tile grows to several times the height of its neighbours. Zeroing
+   the floor is what lets object-fit:cover crop instead. */
+/* The gap and the loading placeholder are the tile's own card showing between
+   the prints, rather than black, so the four read as four rather than as one
+   grid with lines drawn on it. */
+.psc-mosaic{display:grid;gap:2px;aspect-ratio:3/2;overflow:hidden;
+  background:var(--psc-card);
+  grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr) minmax(0,1fr)}
+.psc-mosaic img{width:100%;height:100%;min-width:0;min-height:0;
+  object-fit:cover;display:block;background:var(--psc-card)}
+/* No cell is ever taller than it is wide, whatever shape the photographs are:
+   a portrait frame is cropped to a landscape window rather than given a tall
+   one to sit in. One fills the tile, two stack as full-width bands, three put
+   the odd one along the bottom. */
+.psc-mosaic.n1 img{grid-column:1/3;grid-row:1/3}
+.psc-mosaic.n2 img{grid-column:1/3}
+.psc-mosaic.n3 img:nth-child(3){grid-column:1/3}
+/* Two lines, then an ellipsis. Folder names here run to eighty characters and
+   a tile that grew to fit one would drag its whole row with it; the full name
+   is on the title attribute. This is the same bargain .psc-meta strikes on a
+   card, for the same reason. */
+.psc-foldname{font-weight:600;font-size:13px;padding:9px 11px 0;
+  overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;
+  line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* margin-top:auto pins the count to the bottom of the tile, so the counts
+   across a row sit on one line however the names above them wrapped. */
+.psc-foldmeta{color:var(--psc-mut);font-size:11.5px;
+  padding:3px 11px 11px;
+  margin-top:auto;display:flex;align-items:baseline;gap:8px}
+/* The folder's likes, pushed to the right. Empty and invisible until somebody
+   has actually liked something in there - a row of zeroes would be noise, and
+   a gallery published without a heart service must look untouched by it. */
+.psc-fhearts{margin-left:auto;flex:none;font-variant-numeric:tabular-nums}
+.psc-fhearts:empty{display:none}
+/* Inside a gallery, a card whose folder is just the gallery's own name has
+   nothing to add by repeating it. A card from a merged subfolder keeps its
+   label, because there the folder still says something. */
+.psc-view-folders.psc-open .psc-card[data-samefolder="1"] .psc-meta{display:none}
+/* The header that replaces the index once a folder is open. */
+.psc-crumb{display:none;align-items:center;gap:10px;margin:0 0 12px}
+.psc-view-folders.psc-open .psc-crumb{display:flex}
+.psc-crumb h3{margin:0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.psc-crumb .psc-back{background:#242424;color:var(--psc-fg);border:1px solid #3a3a3a;
+  border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer;flex:none}
+.psc-crumb .psc-back:hover{border-color:#5a5a5a}
+.psc-crumbn{color:var(--psc-mut);font-size:12.5px;margin-left:auto;flex:none}
+/* Shown instead of the tiles when a search matches nothing anywhere. */
+.psc-empty{display:none;color:var(--psc-mut);padding:26px 2px;text-align:center}
+
 /* Narrow screens. These must come after the rules they override: a media query
    carries no extra specificity, so a base rule declared later would win. */
 @media (max-width:600px){
   /* On a 390px phone the gutter, not the column width, is what keeps a third
      column off the screen: three 115px columns need 361px at 8px, 373px at 14. */
   .psc-grid{gap:8px}
+  .psc-folders{gap:8px;row-gap:calc(8px + var(--psc-tab))}
   .psc-bar{margin-left:-10px;margin-right:-10px;padding:8px 10px}
 }
 </style>
@@ -820,8 +958,18 @@ GALLERY_JS = r"""
   // Lets the stylesheet reach the host page's title block without affecting
   // any other page on the site.
   document.documentElement.classList.add('psc-host');
-  var DATA = JSON.parse(root.querySelector('.psc-data').textContent);
+  var RAW = JSON.parse(root.querySelector('.psc-data').textContent);
+  // Photographs in one list, gallery names in another, each photograph holding
+  // the index of its own. Everything below works on DATA exactly as it did when
+  // the payload was a bare array.
+  var DATA = RAW.p, GROUPS = RAW.g;
   var grid = root.querySelector('.psc-grid');
+  var folders = root.querySelector('.psc-folders');
+  var crumb = root.querySelector('.psc-crumb');
+  var crumbN = crumb.querySelector('.psc-crumbn');
+  var emptyEl = root.querySelector('.psc-empty');
+  // Which gallery is open, as an index into GROUPS, or -1 for the index itself.
+  var openGroup = -1;
   var lb = root.querySelector('.psc-lb'), lbImg = lb.querySelector('img');
   // Re-parent the overlay to <body>. position:fixed resolves against the
   // nearest ancestor with a transform/filter/perspective rather than against
@@ -865,23 +1013,47 @@ GALLERY_JS = r"""
     return out;
   }
 
-  DATA.forEach(function(p, i){
+  // ---- the model -----------------------------------------------------------
+  // What the filters run on. The grid is built from this on demand - a folder's
+  // cards only come into existence when somebody opens that folder - so
+  // filtering, counting and the folder index all answer from here rather than
+  // from whatever happens to be in the DOM. A library of ten thousand
+  // photographs therefore costs the same to open as one of five hundred.
+  //
+  // Everything searchable in one string: file name, folder, every date form,
+  // the rating band and the written feedback, so 'wyoming', 'August 2011',
+  // '2011-06', 'top pick' and 'moody landscape' all find photographs.
+  // Lowercased here and the query is lowercased on input, so every search is
+  // case-insensitive in both directions.
+  //
+  // Tags are NOT baked in: they change while the page is open, and apply()
+  // reads TAGBLOB for them instead.
+  var SEARCH = DATA.map(function(p){
+    return ((p.n||'') + ' ' + (p.f||'') + ' ' + (p.fr||'') + ' ' + (p.d||'') +
+            ' ' + prettyDate(p.d) + ' ' + (p.r||'') + ' ' + (p.v||'') + ' ' +
+            (p.note||'') + ' ' + (p.w||'')).toLowerCase();
+  });
+  // 1 where the photograph passes the current filters. Written by apply(), read
+  // by everything that has to count, cover or order a folder.
+  var MATCH = new Uint8Array(DATA.length);
+  // Heart tallies by photo_id, held outside the DOM so a folder nobody has
+  // opened still contributes its likes to the index.
+  var HEARTS = {};
+  // Filled in by the hearts client, so cards built later still get painted.
+  var paintNewCardHearts = null;
+
+  function buildCard(i){
+    var p = DATA[i];
     var c = document.createElement('div');
     c.className = 'psc-card';
     var pd = prettyDate(p.d);
     c.dataset.verdict = p.v;
-    // Everything searchable in one string: file name, folder, tags, every date
-    // form, the rating band and the written feedback, so 'wyoming',
-    // 'August 2011', '2011-06', 'top pick' and 'moody landscape' all find
-    // photographs. Lowercased here and the query is lowercased on input, so
-    // every search is case-insensitive in both directions.
-    c.dataset.search = ((p.n||'') + ' ' + (p.f||'') + ' ' + (p.fr||'') + ' ' +
-                        (p.d||'') + ' ' + pd + ' ' + (p.r||'') + ' ' +
-                        (p.v||'') + ' ' + (p.note||'') + ' ' +
-                        (p.w||'')).toLowerCase();
-    // Tags are NOT baked into data-search: they change while the page is open,
-    // and apply() reads the live data-tags attribute for them instead.
+    c.dataset.search = SEARCH[i];
     c.dataset.idx = i;
+    c.dataset.group = p.g;
+    // Whether this card's folder label is simply the gallery it sits in, so
+    // the stylesheet can drop it once you are already inside that gallery.
+    if ((p.f || '') === GROUPS[p.g]) c.dataset.samefolder = '1';
     c.dataset.name = p.n || '';
     c.dataset.folder = p.f || '';
     c.dataset.date = p.d || '';
@@ -965,10 +1137,56 @@ GALLERY_JS = r"""
       b.appendChild(hrow);
     }
 
-    c.appendChild(b); grid.appendChild(c);
-  });
+    c.appendChild(b);
+    renderCardTags(c);
+    wireTagInput(c);
+    if (HEARTS[p.id] != null) c.dataset.hearts = HEARTS[p.id];
+    return c;
+  }
 
-  var cards = [].slice.call(grid.children);
+  // idx -> the card element, once it has been built. Sparse on purpose.
+  var cardFor = new Array(DATA.length);
+  // The cards that currently exist, in the order the grid shows them.
+  function builtCards(){ return [].slice.call(grid.children); }
+
+  // Build whatever is missing from a list of indices and hand back the new
+  // elements. Everything downstream - tags, hearts, the sort order - is applied
+  // to them here, so a card built on the thousandth click is indistinguishable
+  // from one built at load.
+  function ensureCards(list){
+    var made = [], frag = null;
+    for (var k = 0; k < list.length; k++){
+      var i = list[k];
+      if (cardFor[i]) continue;
+      var c = buildCard(i);
+      cardFor[i] = c;
+      if (!frag) frag = document.createDocumentFragment();
+      frag.appendChild(c);
+      made.push(c);
+    }
+    if (frag) grid.appendChild(frag);
+    if (made.length && paintNewCardHearts) paintNewCardHearts(made);
+    return made;
+  }
+
+  var ALLIDX = null;
+  function allIdx(){
+    if (!ALLIDX){
+      ALLIDX = new Array(DATA.length);
+      for (var i = 0; i < DATA.length; i++) ALLIDX[i] = i;
+    }
+    return ALLIDX;
+  }
+
+  // The cards the current view actually needs. The folder index needs none at
+  // all: it is drawn from the model, and opening a folder is what brings that
+  // folder's photographs into the page.
+  function ensureView(){
+    var list = view === 'all' ? allIdx()
+             : (openGroup >= 0 ? byGroup[openGroup] : null);
+    if (list && ensureCards(list).length) sortCards(photoSort);
+  }
+
   var counter = root.querySelector('.psc-count');
 
   // ---- tagging ------------------------------------------------------------
@@ -983,6 +1201,22 @@ GALLERY_JS = r"""
     // The visitor's own edits win over whatever was baked into the page.
     for (var k in saved) if (Array.isArray(saved[k])) TAGS[k] = saved[k];
   } catch (e) {}
+
+  // The searchable form of each photograph's tags, kept alongside TAGS so the
+  // filter can read them for photographs whose cards do not exist yet.
+  // Pipe-delimited so a chip cannot match a substring: "Lake" must not match
+  // "Lake Photos". A pipe can never appear in a tag.
+  var TAGBLOB = {};
+  function reblob(id){
+    var t = TAGS[id];
+    if (t && t.length) TAGBLOB[id] = '|' + t.join('|').toLowerCase() + '|';
+    else delete TAGBLOB[id];
+  }
+  function reblobAll(){
+    TAGBLOB = {};
+    for (var k in TAGS) reblob(k);
+  }
+  reblobAll();
 
   var toastEl = root.querySelector('.psc-toast') ||
                 document.body.appendChild(document.createElement('div'));
@@ -1073,10 +1307,8 @@ GALLERY_JS = r"""
       });
       list.insertBefore(chip, input);
     });
-    // Pipe-delimited so a chip cannot match a substring: "Lake" must not match
-    // "Lake Photos". A pipe can never appear in a tag.
-    card.dataset.tags = tagsFor(id).length
-      ? '|' + tagsFor(id).join('|').toLowerCase() + '|' : '';
+    reblob(id);
+    card.dataset.tags = TAGBLOB[id] || '';
   }
 
   function addTagToCard(card, raw){
@@ -1091,8 +1323,7 @@ GALLERY_JS = r"""
     return true;
   }
 
-  cards.forEach(function(card){
-    renderCardTags(card);
+  function wireTagInput(card){
     var input = card.querySelector('.psc-taginput');
     input.addEventListener('keydown', function(e){
       if (e.key === 'Enter' || e.key === ','){
@@ -1117,7 +1348,7 @@ GALLERY_JS = r"""
     input.addEventListener('blur', function(){
       if (input.value.trim()){ addTagToCard(card, input.value); input.value = ''; }
     });
-  });
+  }
 
   // ---- the tag search ------------------------------------------------------
   var selected = [];
@@ -1139,7 +1370,8 @@ GALLERY_JS = r"""
   function selectTag(name){
     if (!selected.some(function(t){ return t.toLowerCase() === name.toLowerCase(); }))
       selected.push(name);
-    qEl.value = ''; query = '';
+    qEl.value = '';
+    clearTimeout(qTimer); qTimer = null; query = '';
     closeMenu(); renderChips(); apply();
   }
 
@@ -1212,16 +1444,16 @@ GALLERY_JS = r"""
       if (kept.length !== TAGS[k].length) hit++;
       if (kept.length) TAGS[k] = kept; else delete TAGS[k];
     });
-    persist();
-    cards.forEach(function(c){ renderCardTags(c); });
+    persist(); reblobAll();
+    builtCards().forEach(function(c){ renderCardTags(c); });
     refreshTagUI();
     toast('Removed "' + name + '" from ' + hit + (hit === 1 ? ' photo' : ' photos'),
           'Undo', function(){
       var restored = JSON.parse(before);
       Object.keys(TAGS).forEach(function(k){ delete TAGS[k]; });
       for (var k in restored) TAGS[k] = restored[k];
-      persist();
-      cards.forEach(function(c){ renderCardTags(c); });
+      persist(); reblobAll();
+      builtCards().forEach(function(c){ renderCardTags(c); });
       refreshTagUI();
       toast('Put "' + name + '" back');
     });
@@ -1248,7 +1480,9 @@ GALLERY_JS = r"""
       if (menuIdx >= 0 && menuItems[menuIdx]){ e.preventDefault(); selectTag(menuItems[menuIdx]); }
     } else if (e.key === 'Backspace' && !qEl.value && selected.length){
       selected.pop(); renderChips(); apply();
-    } else if (e.key === 'Escape'){ qEl.value = ''; query = ''; closeMenu(); apply(); }
+    } else if (e.key === 'Escape'){
+      qEl.value = ''; closeMenu(); searchNow('');
+    }
   });
   // Clicking the padding around the input should focus it, as a single box would.
   searchWrap.addEventListener('mousedown', function(e){
@@ -1264,24 +1498,55 @@ GALLERY_JS = r"""
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
     toast('psc-web-tags.json downloaded');
   };
+  // Two passes, and the split is the point. The first runs over the model and
+  // decides what matches; it touches no elements, so it costs the same whether
+  // one card has been built or ten thousand. The second only walks the cards
+  // that actually exist, which in the folder index is none at all.
   function apply(){
-    var n=0;
-    cards.forEach(function(c){
-      var tagged = c.dataset.tags || '';
+    var n = 0, folderOpen = (view === 'folders' && openGroup >= 0);
+    // Lowercased and wrapped once rather than once per photograph.
+    var chips = selected.map(function(t){ return '|' + t.toLowerCase() + '|'; });
+    for (var i = 0; i < DATA.length; i++){
+      var p = DATA[i];
+      var tagged = TAGBLOB[p.id] || '';
+      var ok = (band === 'all' || p.v === band);
       // Selected tags are ORed: each chip widens the results rather than
       // narrowing them, so two tags show every photograph carrying either.
-      var okChips = !selected.length || selected.some(function(t){
-        return tagged.indexOf('|' + t.toLowerCase() + '|') >= 0; });
+      if (ok && chips.length){
+        ok = false;
+        for (var j = 0; j < chips.length; j++)
+          if (tagged.indexOf(chips[j]) >= 0){ ok = true; break; }
+      }
       // Composes with everything else: Top picks + Liked shows top picks that
       // someone has liked, not one or the other.
-      var liked = !likedOnly || parseFloat(c.dataset.hearts || '0') > 0;
-      var ok = (band==='all' || c.dataset.verdict===band) && okChips && liked &&
-               (!query || c.dataset.search.indexOf(query)>=0 ||
-                tagged.indexOf(query)>=0);
-      c.classList.toggle('psc-hidden', !ok);
+      if (ok && likedOnly) ok = (HEARTS[p.id] || 0) > 0;
+      if (ok && query) ok = SEARCH[i].indexOf(query) >= 0 ||
+                            tagged.indexOf(query) >= 0;
+      // An open folder is the last word: whatever the filters allow, nothing
+      // from another gallery appears, and the lightbox arrows - which walk
+      // whatever is visible - therefore stop at the folder's edges.
+      if (ok && folderOpen && p.g !== openGroup) ok = false;
+      MATCH[i] = ok ? 1 : 0;
       if (ok) n++;
-    });
-    counter.textContent = n + ' of ' + cards.length;
+    }
+    var live = grid.children;
+    for (var k = 0; k < live.length; k++)
+      live[k].classList.toggle('psc-hidden', !MATCH[+live[k].dataset.idx]);
+    if (inIndex()){
+      // n is every photograph that matched, across all the folders still
+      // standing, so the two halves of this line answer different questions.
+      var nf = refreshFolders();
+      counter.textContent = nf + (nf === 1 ? ' folder' : ' folders') +
+                            ' · ' + n + ' of ' + DATA.length;
+    } else {
+      emptyEl.style.display = 'none';
+      counter.textContent = n + ' of ' + DATA.length;
+      if (folderOpen){
+        crumbN.textContent = n === byGroup[openGroup].length
+          ? n + (n === 1 ? ' photo' : ' photos')
+          : n + ' of ' + byGroup[openGroup].length;
+      }
+    }
     // If the grid is refiltered while the overlay is open, rebuild the walk
     // list but stay on the same photograph when it survives the change.
     if (lb.classList.contains('open')) {
@@ -1306,10 +1571,21 @@ GALLERY_JS = r"""
     apply();
   };
 
-  root.querySelector('.psc-q').oninput=function(e){
-    query = e.target.value.toLowerCase();
-    openMenu(e.target.value);
+  // The tag menu reopens on every keystroke - it is what the visitor is
+  // watching while they type - but the filter itself waits for a pause. On a
+  // large library each pass reads every photograph, and running one per
+  // keystroke is what makes a search box feel like it is fighting back.
+  var qTimer = null;
+  function searchNow(value){
+    clearTimeout(qTimer); qTimer = null;
+    query = (value || '').toLowerCase();
     apply();
+  }
+  qEl.oninput = function(e){
+    var raw = e.target.value;
+    openMenu(raw);
+    clearTimeout(qTimer);
+    qTimer = setTimeout(function(){ searchNow(raw); }, 120);
   };
 
   // ---- sorting ------------------------------------------------------------
@@ -1326,7 +1602,7 @@ GALLERY_JS = r"""
       if (key === 'folder') return c.dataset.folder || '';
       return c.dataset.name || '';
     }
-    var ordered = cards.slice().sort(function(a,b){
+    var ordered = builtCards().sort(function(a,b){
       var va = value(a), vb = value(b), r;
       if (key === 'score' || key === 'hearts') r = va - vb;
       else if (!va && !vb) r = 0;
@@ -1349,7 +1625,301 @@ GALLERY_JS = r"""
     grid.appendChild(frag);
   }
   var sortSel = root.querySelector('.psc-sort');
-  if (sortSel) sortSel.onchange = function(e){ sortCards(e.target.value); apply(); };
+  if (sortSel) sortSel.onchange = function(e){
+    // On the index the box orders the folder tiles; everywhere else it orders
+    // the photographs. Each view remembers its own choice.
+    if (inIndex()){ indexSort = e.target.value; sortFolders(indexSort); }
+    else { photoSort = e.target.value; sortCards(photoSort); }
+    apply();
+  };
+
+  // ---- folder galleries ---------------------------------------------------
+  // Two ways through the same photographs: an index of folders to pick from, or
+  // all of them at once. Nothing is duplicated - the cards are the same elements
+  // in both, and the index hides the grid rather than emptying it, so tags,
+  // hearts, the sort order and the lightbox all survive switching back and
+  // forth.
+  var VIEW_KEY = 'psc-view:' + location.pathname;
+  var view = root.dataset.view === 'all' ? 'all' : 'folders';
+  try {
+    var savedView = localStorage.getItem(VIEW_KEY);
+    if (savedView === 'all' || savedView === 'folders') view = savedView;
+  } catch (e) {}
+
+  // Which photographs belong to which gallery, as indices into DATA. Indices
+  // rather than elements: a folder has to be counted, covered and sorted long
+  // before anybody opens it, and until they do it has no cards.
+  var byGroup = GROUPS.map(function(){ return []; });
+  DATA.forEach(function(p, i){ byGroup[+p.g].push(i); });
+
+  // A-Z by name, with the same collator the Folder A-Z sort uses on cards, so
+  // the two agree to the letter. Fixed rather than adjustable: a box offering
+  // one order and its reverse is a control that earns nothing. Unfiled is not
+  // a folder anybody named, so it sits at the end whatever it would collate as.
+  var UNFILED = 'Unfiled';
+  var folderOrder = GROUPS.map(function(_, i){ return i; }).sort(function(a, b){
+    var na = GROUPS[a], nb = GROUPS[b];
+    if ((na === UNFILED) !== (nb === UNFILED)) return na === UNFILED ? 1 : -1;
+    return collator.compare(na, nb);
+  });
+
+  // '2011' for a single year, '2010-2011' for a shoot that crossed one.
+  function yearSpan(a, b){
+    var ya = a.slice(0, 4), yb = b.slice(0, 4);
+    return ya === yb ? ya : ya + '–' + yb;
+  }
+
+  var tiles = [];
+  folderOrder.forEach(function(gi){
+    // A real <button>, so it is focusable, reachable by keyboard and announced
+    // as a control without any of that having to be reimplemented.
+    var t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'psc-fold';
+    t.dataset.group = gi;
+    var mos = document.createElement('div');
+    mos.className = 'psc-mosaic';
+    var imgs = [];
+    for (var k = 0; k < 4; k++){
+      var im = document.createElement('img');
+      im.loading = 'lazy'; im.alt = '';
+      mos.appendChild(im); imgs.push(im);
+    }
+    var nm = document.createElement('div');
+    nm.className = 'psc-foldname';
+    nm.textContent = GROUPS[gi];
+    nm.title = GROUPS[gi];
+    var mt = document.createElement('div');
+    mt.className = 'psc-foldmeta';
+    var mc = document.createElement('span');
+    var mh = document.createElement('span');
+    mh.className = 'psc-fhearts';
+    mt.appendChild(mc); mt.appendChild(mh);
+    t.appendChild(mos); t.appendChild(nm); t.appendChild(mt);
+    t.onclick = function(){ openFolder(gi); };
+    folders.appendChild(t);
+    tiles.push({el: t, gi: gi, mos: mos, imgs: imgs, meta: mc, hearts: mh});
+  });
+
+  // The cover shows the best of whatever currently passes the filters, so a
+  // search for 'night' leaves every folder wearing its best night photograph
+  // rather than a cover that no longer represents what is inside.
+  function paintTile(t){
+    var live = [], oldest = '', newest = '', likes = 0, ids = byGroup[t.gi];
+    for (var k = 0; k < ids.length; k++){
+      if (!MATCH[ids[k]]) continue;
+      var p = DATA[ids[k]];
+      live.push(ids[k]);
+      likes += HEARTS[p.id] || 0;
+      var d = p.d || '';
+      if (d){ if (!oldest || d < oldest) oldest = d; if (d > newest) newest = d; }
+    }
+    t.el.style.display = live.length ? '' : 'none';
+    if (!live.length) return;
+    live.sort(function(a, b){
+      return (parseFloat(DATA[b].s) || 0) - (parseFloat(DATA[a].s) || 0);
+    });
+    var pick = live.slice(0, 4);
+    // The class drives the layout: one photograph fills the tile, two split it,
+    // three put the best one down the left. Four is the plain 2x2.
+    t.mos.className = 'psc-mosaic n' + pick.length;
+    t.imgs.forEach(function(im, k){
+      if (pick[k] === undefined){
+        im.style.display = 'none'; im.removeAttribute('src'); return;
+      }
+      im.style.display = '';
+      // Only touched when it actually changes, so typing in the search box does
+      // not restart a download on every keystroke.
+      var want = DATA[pick[k]].th || '';
+      if (im.getAttribute('src') !== want) im.setAttribute('src', want);
+    });
+    t.meta.textContent = live.length + (live.length === 1 ? ' photo' : ' photos') +
+      (newest ? ' · ' + yearSpan(oldest || newest, newest) : '');
+    // Blank, not zero: a folder nobody has liked says nothing at all, and the
+    // :empty rule then takes the element out of the layout entirely.
+    t.hearts.textContent = likes > 0 ? '\u2764\ufe0f ' + likes : '';
+  }
+
+  // The heart tallies arrive after the page has drawn, and change again every
+  // time somebody clicks one, so the index is repainted on both.
+  function heartsChanged(){ if (inIndex()) refreshFolders(); }
+
+  function inIndex(){ return view === 'folders' && openGroup < 0; }
+
+  // One sort box serves both views, but they want different answers, so each
+  // keeps its own choice. The index opens on A-Z because that is the order the
+  // folders are meant to read in; a folder opens on the best photographs first,
+  // the same as the flat gallery.
+  var indexSort = 'folder-asc', photoSort = 'score-desc';
+
+  // What a folder is worth under each ordering. Score, date and likes are read
+  // off the photographs currently passing the filters, so a search reorders the
+  // tiles by what actually survived it rather than by what used to be inside.
+  function folderKey(gi, key){
+    var best = null, likes = 0, seen = false, ids = byGroup[gi];
+    for (var k = 0; k < ids.length; k++){
+      if (!MATCH[ids[k]]) continue;
+      var p = DATA[ids[k]];
+      seen = true;
+      likes += HEARTS[p.id] || 0;
+      if (key === 'score'){
+        var s = parseFloat(p.s) || 0;
+        if (best === null || s > best) best = s;
+      } else if (key === 'date'){
+        var d = p.d || '';
+        if (d && (best === null || d > best)) best = d;
+      }
+    }
+    if (key === 'hearts') return seen ? likes : 0;
+    return best;
+  }
+
+  // Tiles are moved rather than rebuilt, so their mosaics keep the images they
+  // have already downloaded.
+  function sortFolders(mode){
+    var bits = mode.split('-'), key = bits[0], sign = bits[1] === 'desc' ? -1 : 1;
+    // A tile has no file name of its own, so File name orders it the only way
+    // that means anything here - by the folder's name.
+    if (key === 'name') key = 'folder';
+    var order = folderOrder.slice().sort(function(a, b){
+      var na = GROUPS[a], nb = GROUPS[b];
+      // Unfiled is not a folder anybody named; it sits at the end of every
+      // ordering rather than leading the reversed ones.
+      if ((na === UNFILED) !== (nb === UNFILED)) return na === UNFILED ? 1 : -1;
+      var r;
+      if (key === 'folder') r = collator.compare(na, nb);
+      else {
+        var va = folderKey(a, key), vb = folderKey(b, key);
+        // A folder with nothing showing sinks, whichever way the sort runs.
+        if (va === null && vb === null) r = 0;
+        else if (va === null) return 1;
+        else if (vb === null) return -1;
+        else if (key === 'date') r = va < vb ? -1 : va > vb ? 1 : 0;
+        else r = va - vb;
+      }
+      // Ties fall back to the name, so equal scores stay in a readable order.
+      if (r === 0) return collator.compare(na, nb);
+      return r * sign;
+    });
+    var pos = {};
+    order.forEach(function(gi, i){ pos[gi] = i; });
+    var frag = document.createDocumentFragment();
+    tiles.slice().sort(function(a, b){ return pos[a.gi] - pos[b.gi]; })
+         .forEach(function(t){ frag.appendChild(t.el); });
+    folders.appendChild(frag);
+  }
+
+  // Called by apply() once the filters have decided what is visible.
+  function refreshFolders(){
+    var shown = 0;
+    tiles.forEach(function(t){
+      paintTile(t);
+      if (t.el.style.display !== 'none') shown++;
+    });
+    // Score, date and likes are read off what survived the filters, so the
+    // tiles are reordered alongside being repainted.
+    sortFolders(indexSort);
+    emptyEl.style.display = shown ? 'none' : 'block';
+    return shown;
+  }
+
+  // Inside a folder, every photograph shares that folder, so ordering by it
+  // sorts nothing. The options are taken out of the box there and put back in
+  // All photos, where photographs really do span folders.
+  //
+  // Removed and reinserted rather than hidden: `hidden` on an <option> is not
+  // honoured everywhere, and a select that silently ignores it would show an
+  // option that does nothing.
+  var allSortOpts = sortSel ? [].slice.call(sortSel.options) : [];
+  // Each view drops the orderings that say nothing in it.
+  //
+  // On the index: Score and File name. A folder is not a photograph - it has no
+  // score and no file name of its own, so neither is a question anybody is
+  // asking of a row of folders.
+  // Inside a folder: Folder. Every photograph in there shares it.
+  // In All photos: none of them - the photographs span folders, and each one
+  // has a score and a name.
+  function syncSortOptions(){
+    if (!sortSel) return;
+    var drop = inIndex() ? ['score-', 'name-']
+             : (view === 'folders' && openGroup >= 0) ? ['folder-'] : [];
+    var want = allSortOpts.filter(function(o){
+      return !drop.some(function(d){ return o.value.indexOf(d) === 0; });
+    });
+    // Compared by value, not by count: the index drops two options and a folder
+    // drops two different ones, so the lists are the same LENGTH in both and a
+    // length check would skip the rebuild and leave the wrong two missing.
+    var have = [].slice.call(sortSel.options).map(function(o){ return o.value; });
+    if (have.join(',') === want.map(function(o){ return o.value; }).join(',')) return;
+    sortSel.textContent = '';
+    want.forEach(function(o){ sortSel.appendChild(o); });
+  }
+
+  function offers(value){
+    return [].slice.call(sortSel.options).some(function(o){ return o.value === value; });
+  }
+
+  // The sort box is on screen in every view; what changes is what it offers and
+  // what it acts on. Each view keeps its own choice, so moving between them
+  // never silently reorders the other one.
+  function syncBar(){
+    syncSortOptions();
+    if (sortSel){
+      var want = inIndex() ? indexSort : photoSort;
+      // A choice the box no longer carries falls back to the order that view
+      // opens on - which differs, since the index cannot offer Score and a
+      // folder cannot offer Folder.
+      if (!offers(want)){
+        if (inIndex()) { indexSort = 'folder-asc'; want = indexSort; }
+        else { photoSort = 'score-desc'; want = photoSort; sortCards(want); }
+      }
+      sortSel.value = want;
+      if (inIndex()) sortFolders(indexSort);
+    }
+    root.classList.toggle('psc-view-folders', view === 'folders');
+    root.classList.toggle('psc-open', view === 'folders' && openGroup >= 0);
+    root.querySelectorAll('.psc-views button').forEach(function(b){
+      b.classList.toggle('on', b.dataset.view === view);
+    });
+  }
+
+  // Both entering and leaving a folder put you at the top of the gallery.
+  // Landing halfway down a folder you have never seen, at whatever offset the
+  // index happened to be scrolled to, is disorienting.
+  function toTop(){
+    if (root.getBoundingClientRect().top < 0) root.scrollIntoView({block: 'start'});
+  }
+
+  function openFolder(gi){
+    openGroup = gi;
+    crumb.querySelector('h3').textContent = GROUPS[gi];
+    // This is where a folder's photographs come into the page.
+    ensureView();
+    syncBar(); apply(); toTop();
+  }
+
+  function closeFolder(){
+    openGroup = -1;
+    syncBar(); apply(); toTop();
+  }
+
+  function setView(v){
+    view = v;
+    openGroup = -1;
+    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+    // All photos is an explicit ask for everything at once, so it is the one
+    // view that does build the whole grid.
+    ensureView();
+    syncBar(); apply();
+  }
+
+  root.querySelectorAll('.psc-views button').forEach(function(b){
+    b.onclick = function(){ setView(b.dataset.view); };
+  });
+  var backBtn = root.querySelector('.psc-back');
+  if (backBtn) backBtn.onclick = closeFolder;
+  ensureView();
+  syncBar();
 
   // ---- thumbnail size -----------------------------------------------------
   // Pinching a phone zooms the page, which magnifies one column rather than
@@ -1394,8 +1964,6 @@ GALLERY_JS = r"""
   // functional with the hearts simply absent.
   (function hearts(){
     if (!HEARTS_API) return;
-    var rows = [].slice.call(root.querySelectorAll('.psc-hearts'));
-    if (!rows.length) return;
 
     // One identifier per browser, minted once. It is not an account and
     // identifies nobody: the service stores only a salted hash of it.
@@ -1446,14 +2014,37 @@ GALLERY_JS = r"""
       row.dataset.mine = mine ? '1' : '';
     }
 
+    // The tally is recorded whether or not anything is showing it. HEARTS is
+    // what the folder index and the Liked filter read, and a folder nobody has
+    // opened has no cards to read instead.
+    function record(id, count, mine){
+      TALLY[id] = {count: count, mine: !!mine};
+      HEARTS[id] = count;
+    }
+
     // Paint every row showing this photograph - its card, and the overlay if it
     // happens to be open on it.
     function paintPhoto(id, count, mine){
-      TALLY[id] = {count: count, mine: !!mine};
+      record(id, count, mine);
       var sel = '.psc-heart[data-photo-id="' + id + '"]';
       [root, lb].forEach(function(scope){
         var btn = scope.querySelector(sel);
         if (btn) paintRow(btn.closest('.psc-hearts'), count, mine);
+      });
+      heartsChanged();
+    }
+
+    // Bring a set of heart rows up to date with the tallies already in hand,
+    // and reveal them. Used once when the service answers, and again for every
+    // card built after that.
+    function paintRows(rows){
+      rows.forEach(function(row){
+        var btn = row.querySelector('.psc-heart');
+        if (!btn) return;
+        var t = TALLY[btn.dataset.photoId];
+        if (!t) return;
+        paintRow(row, t.count, t.mine);
+        row.classList.remove('psc-pending');   // reveal only on success
       });
     }
 
@@ -1466,15 +2057,29 @@ GALLERY_JS = r"""
       if (t) paintRow(lbHearts, t.count, t.mine);
     };
 
+    var answered = false;
+    // Cards built after the service has answered - when a folder is opened -
+    // arrive with their heart rows still hidden, so they are caught up here.
+    paintNewCardHearts = function(made){
+      if (!answered) return;
+      var rows = [];
+      made.forEach(function(c){
+        var r = c.querySelector('.psc-hearts');
+        if (r) rows.push(r);
+      });
+      paintRows(rows);
+    };
+
     api('', {method: 'GET'}).then(function(data){
       var counts = data.counts || {}, mine = {};
       (data.mine || []).forEach(function(id){ mine[id] = true; });
-      rows.forEach(function(row){
-        var id = row.querySelector('.psc-heart').dataset.photoId;
-        paintPhoto(id, counts[id] || 0, !!mine[id]);
-        row.classList.remove('psc-pending');    // reveal only on success
-      });
+      // Every photograph, not just the ones with a card: the folder index is
+      // drawn from these numbers and most of its folders are still unopened.
+      DATA.forEach(function(p){ record(p.id, counts[p.id] || 0, !!mine[p.id]); });
+      answered = true;
+      paintRows([].slice.call(root.querySelectorAll('.psc-hearts')));
       if (lbOpenOn()) paintLbHeart(lbOpenOn());
+      heartsChanged();          // the folder index shows each folder's total
       // The tallies arrive after the grid is built, so a visitor who is already
       // on "Most liked" would be looking at an order built from zeroes.
       // Deliberately NOT re-sorted when someone clicks a heart: photographs
@@ -1714,11 +2319,19 @@ GALLERY_JS = r"""
 """
 
 
+# Grouping lives in photo_scout so the published page and the local report
+# cannot drift apart on what counts as one folder. Re-exported here because
+# that is the name this module has always offered.
+UNFILED_GROUP = ps.UNFILED_GROUP
+folder_group = ps.folder_group
+
+
 def build_gallery_html(items: list[dict], tags_by_id: dict,
                        local: bool = False, bleed: bool = True,
                        max_width: int = 1800, col_width: int = 260,
                        gap: int = 8, title_size: str = "compact",
-                       hearts_url: str = "") -> str:
+                       hearts_url: str = "", view: str = "folders",
+                       folder_outline: str = DEFAULT_FOLDER_OUTLINE) -> str:
     """
     One self-contained HTML card.
 
@@ -1729,6 +2342,22 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
     Note what is absent - there are no file:// links. Those are meaningless to a
     visitor and would publish your directory layout.
     """
+    # Narrowed to the two words it can be before it reaches an attribute. The
+    # command line already constrains it; this is for any other caller, so the
+    # attribute cannot be anything but one of these whatever is passed in.
+    view = "all" if view == "all" else "folders"
+    # Gallery names are sent once in their own list and referred to by number.
+    # Spelled out on every photograph they would be the single largest thing in
+    # the payload - a few hundred repetitions of the same long folder name - and
+    # the whole gallery has to fit inside one Lexical document.
+    #
+    # Sorted here only so the published markup is stable between runs. The page
+    # decides display order for itself, with the same collator it uses for every
+    # other sort, so 'Folder A-Z' and the default agree to the letter.
+    groups = sorted({folder_group(it["folder"]) for it in items},
+                    key=lambda s: (s.casefold(), s))
+    group_index = {name: i for i, name in enumerate(groups)}
+
     payload = []
     for it in items:
         note_main, note_flag = ps.split_note(it["note"])
@@ -1741,6 +2370,8 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
             # the capture date beside it already says when. The name as it
             # stands on disk is kept in "fr" so a search for it still works.
             "f": ps.strip_folder_date(it["folder"]),
+            # Which gallery this belongs to, as an index into the list above.
+            "g": group_index[folder_group(it["folder"])],
             # 'YYYY-MM-DD HH:MM:SS' (or just the date when the camera recorded
             # no clock time). One field: it sorts as plain text down to the
             # minute, and the browser renders the long form, so the payload does
@@ -1767,23 +2398,38 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
             entry["t"] = tl
         payload.append(entry)
 
-    data_json = ps.script_json(payload, ensure_ascii=False)
+    data_json = ps.script_json({"g": groups, "p": payload}, ensure_ascii=False)
 
     top = sum(1 for i in items if i["verdict"] == "TOP PICK")
     strong = sum(1 for i in items if i["verdict"] == "STRONG")
 
+    pal = folder_palette(folder_outline)
     css = (GALLERY_CSS.replace("__MAXW__", str(max_width))
                       .replace("__COLW__", str(col_width))
                       .replace("__GAPPX__", f"{gap}px")
+                      .replace("__FOLDLINE__", pal["line"])
+                      .replace("__FOLDLINEHOVER__", pal["hover"])
                       .replace("__HEADCSS__", TITLE_SIZE_CSS[title_size]))
     # No endpoint means no heart buttons at all, rather than dead ones.
     hearts_attr = (f' data-hearts="{html.escape(hearts_url, quote=True)}"'
                    if hearts_url else "")
+    # Which view the page opens on. The visitor's own last choice, kept in their
+    # browser, wins over this - but only for a page they have already opened.
+    view_class = " psc-view-folders" if view == "folders" else ""
     return (
-        f'<div class="psc-wrap{" psc-bleed" if bleed else ""}"'
-        f'{hearts_attr}>'
+        f'<div class="psc-wrap{" psc-bleed" if bleed else ""}{view_class}"'
+        f' data-view="{view}"{hearts_attr}>'
         + css +
         '<div class="psc-bar">'
+        # Folders first and leftmost: it is the way in, and on a phone the bar
+        # wraps, so the control that changes the most has to be the one that
+        # stays on the first line.
+        '<span class="psc-views">'
+        '<button class="psc-vfolders" data-view="folders" type="button" '
+        'title="Browse by folder">Folders</button>'
+        '<button class="psc-vall" data-view="all" type="button" '
+        'title="Every photograph on one page">All photos</button>'
+        '</span>'
         '<button data-band="all" class="on" type="button">All</button>'
         '<button data-band="TOP PICK" type="button">Top picks</button>'
         '<button data-band="STRONG" type="button">Strong</button>'
@@ -1822,6 +2468,12 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         f'<span class="psc-count">{top + strong} of {top + strong}</span>'
         '</div>'
         '<div class="psc-toast"></div>'
+        '<div class="psc-crumb">'
+        '<button class="psc-back" type="button">&#8249; All folders</button>'
+        '<h3></h3><span class="psc-crumbn"></span>'
+        '</div>'
+        '<div class="psc-folders"></div>'
+        '<div class="psc-empty">Nothing matches that search.</div>'
         '<div class="psc-grid"></div>'
         '<div class="psc-lb">'
         '<button class="x" type="button" aria-label="Close">&times;</button>'
@@ -2090,6 +2742,18 @@ def main(argv=None) -> int:
                     help="Admin token for the heart service, so this script can "
                          "register which photographs may be hearted. Or set "
                          "HEARTS_ADMIN_TOKEN.")
+    ap.add_argument("--folder-outline", metavar="HEX",
+                    default=DEFAULT_FOLDER_OUTLINE,
+                    help=f"Outline colour of the folder tiles on the index, as "
+                         f"a hex value like {DEFAULT_FOLDER_OUTLINE}. The tiles "
+                         f"keep the page's own background; only the folder "
+                         f"shape is coloured. A colour too dark to see against "
+                         f"that background is lifted until it is.")
+    ap.add_argument("--view", choices=("folders", "all"), default="folders",
+                    help="Which view the gallery opens on. 'folders' shows an "
+                         "index of folders to pick from; 'all' puts every "
+                         "photograph on one page. A visitor can switch either "
+                         "way, and their choice is remembered.")
     ap.add_argument("--insecure-http", action="store_true",
                     help="Allow a plain http:// site or heart endpoint. Off by "
                          "default: it sends the Admin API key in the clear.")
@@ -2100,6 +2764,15 @@ def main(argv=None) -> int:
     ap.add_argument("--emit-html", metavar="FILE",
                     help="Also write the generated gallery to a local file for inspection")
     args = ap.parse_args(argv)
+
+    # Written into the page's stylesheet, so it is checked before anything is
+    # built or uploaded. folder_palette rebuilds the string from parsed
+    # numbers, so a value carrying CSS of its own cannot survive the trip -
+    # this is only here so a typo reads as a sentence rather than a traceback.
+    if not ps.outline_ok(args.folder_outline):
+        ps.log(f"ERROR: --folder-outline {args.folder_outline!r} is not a colour.")
+        ps.log("       Wanted a hex value like #b09468 or #b96, and nothing else.")
+        return 2
 
     out_dir = Path(args.out).expanduser().resolve() if args.out else ps.DEFAULT_OUT_DIR
     scores = out_dir / "scores.sqlite3"
@@ -2253,7 +2926,9 @@ def main(argv=None) -> int:
     gallery = build_gallery_html(items, tags_by_id, bleed=(args.width == "full"),
                                  max_width=args.max_width, col_width=args.column_width,
                                  gap=args.gap, title_size=title_size,
-                                 hearts_url=args.hearts_url or "")
+                                 hearts_url=args.hearts_url or "",
+                                 view=args.view,
+                                 folder_outline=args.folder_outline)
     ps.log(f"Gallery: {len(gallery)/1024:.0f} KB of markup")
 
     if args.emit_html or args.dry_run:
@@ -2270,7 +2945,9 @@ def main(argv=None) -> int:
                                            col_width=args.column_width,
                                            gap=args.gap,
                                            title_size=title_size,
-                                           hearts_url=args.hearts_url or "")
+                                           hearts_url=args.hearts_url or "",
+                                           view=args.view,
+                                           folder_outline=args.folder_outline)
         dest.write_text(
             "<!doctype html><meta charset='utf-8'>"
             # Ghost's own theme supplies this on the published page. The

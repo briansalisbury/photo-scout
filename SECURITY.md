@@ -122,9 +122,15 @@ Worth knowing when judging the impact of something you have found:
 - **The heart database stores no personal data.** No IP addresses, no raw
   visitor tokens — only `sha256(per-install salt + token)`, so the database
   cannot be correlated with anything outside the service.
-- **Folder names are not published.** They stay in the local report. The Ghost
-  gallery and the public heart endpoints expose only opaque photo ids; the one
-  endpoint that returns paths, `/api/hearts/top`, requires the admin token.
+- **Folder and file names ARE published; paths are not.** The Ghost gallery
+  shows each photograph's file name and its folder with any leading date
+  removed, and groups the photographs into galleries named after their
+  top-level folder — so anyone who can see the page can read those names. If a
+  folder is called after a client, a child or an address, that goes up with it.
+  What never leaves your machine is the rest of the path: the drive, the
+  directories above the library, and the location of the report. The public
+  heart endpoints carry opaque photo ids only; the one endpoint that returns
+  paths, `/api/hearts/top`, requires the admin token.
 - **`report.html` is for you, not for the web.** It carries full paths, folder
   names, dates and `file://` links by design — that is what makes it useful
   locally, and it is why the Ghost publisher builds separate markup rather than

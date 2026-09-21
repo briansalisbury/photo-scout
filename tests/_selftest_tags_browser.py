@@ -60,6 +60,11 @@ with sync_playwright() as pw:
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.goto(REPORT.as_uri())
+    # The report opens on the folder index, where no card has been built. This
+    # suite is about tagging cards, so it works in All photos; tagging inside a
+    # folder is covered by the folder suite.
+    page.wait_for_selector("#views button[data-view='all']")
+    page.click("#views button[data-view='all']")
     page.wait_for_selector(".card")
 
     def visible():

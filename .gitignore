@@ -56,6 +56,23 @@ HANDOFF.md
 # GitHub.
 git-setup.ps1
 save.ps1
+
+# Credentials, and the helper that asks for them.
+#
+# keys.secret.xml is the one that MUST never be committed. It holds the Ghost
+# Admin API key and the heart admin token, encrypted with Windows DPAPI under
+# one account on one machine - useless to anybody else, but still a credential
+# store and still nobody's business but yours. The whole *.secret.* pattern is
+# ignored so a second one cannot be created with a name this list has not
+# anticipated.
+#
+# set-keys.ps1 contains no secrets at all - it only prompts - so it would be
+# safe to track. It is ignored because it is a local convenience like the two
+# above, and like them it is NOT restored by a fresh clone.
+set-keys.ps1
+keys.secret.xml
+*.secret.*
+
 psc-web-tags.json
 *.tmp
 Thumbs.db

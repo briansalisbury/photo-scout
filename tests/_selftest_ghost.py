@@ -254,8 +254,10 @@ check("preview html written", (OUT / "ghost_preview.html").exists())
 # The point of a dry run is seeing the gallery. Every image it references must
 # actually exist on disk relative to the preview file.
 _pv = (OUT / "ghost_preview.html").read_text(encoding="utf-8")
+# The payload carries the gallery names alongside the photographs, so the
+# photographs are the "p" half of it.
 _data = json.loads(re.search(r'class="psc-data">(.*?)</script>', _pv, re.S).group(1)
-                   .replace("<\\/", "</"))
+                   .replace("<\\/", "</"))["p"]
 _refs = [e["th"] for e in _data] + [e["pv"] for e in _data]
 _broken = [r for r in _refs if not r or not (OUT / r).exists()]
 check("every image in the dry-run preview resolves on disk",
@@ -311,8 +313,11 @@ check("images are site-relative", "/content/images/2026/08/psc-" in gal)
 check("no absolute mock host in the markup", "http://127.0.0.1" not in gal
       and "mock.ghost" not in gal)
 
-data = json.loads(re.search(r'class="psc-data">(.*?)</script>', gal, re.S).group(1)
-                  .replace("<\\/", "</"))
+payload = json.loads(re.search(r'class="psc-data">(.*?)</script>', gal, re.S).group(1)
+                     .replace("<\\/", "</"))
+data = payload["p"]
+check("gallery names travel once, beside the photographs",
+      isinstance(payload.get("g"), list) and payload["g"], str(payload.get("g"))[:80])
 check("one payload entry per photograph", len(data) == len(short), f"{len(data)}")
 check("every entry has a thumbnail url", all(e["th"] for e in data))
 check("every entry has a photo_id", all(re.fullmatch(r"[0-9a-f]{16}", e["id"]) for e in data))
@@ -346,7 +351,7 @@ print("\n=== an emitted page after a real publish is still viewable ===")
 rc, log2 = run("--key", ADMIN_KEY, "--slug", "photos", "--emit-html", "look.html")
 _lp = (OUT / "look.html").read_text(encoding="utf-8")
 _ld = json.loads(re.search(r'class="psc-data">(.*?)</script>', _lp, re.S).group(1)
-                 .replace("<\\/", "</"))
+                 .replace("<\\/", "</"))["p"]
 check("emitted page uses local paths", all(e["th"].startswith("thumbs/") for e in _ld))
 check("emitted page images resolve", all((OUT / e["th"]).exists() for e in _ld))
 check("the PUBLISHED markup still uses Ghost urls, not local paths",
@@ -582,7 +587,7 @@ rc, log = run("--dry-run", "--web-tags", str(WEB), "--emit-html", "web.html")
 check("publish accepts the file", rc == 0, f"rc={rc}\n{log[-300:]}")
 _wd = json.loads(re.search(r'class="psc-data">(.*?)</script>',
                            (OUT / "web.html").read_text(encoding="utf-8"), re.S)
-                 .group(1).replace("<\\/", "</"))
+                 .group(1).replace("<\\/", "</"))["p"]
 by_id = {e["id"]: e.get("t", []) for e in _wd}
 check("web tags reach the payload", by_id.get(ids[0]) == ["Gallery Wall", "Sold"],
       str(by_id.get(ids[0])))
@@ -597,7 +602,11 @@ rc, log = run("--dry-run", "--web-tags", str(OUT / "nope.json"))
 check("a missing file fails cleanly", rc == 2 and "no such file" in log, f"rc={rc}")
 
 print("\n=== the gallery in a real browser ===")
-rc, _ = run("--dry-run", "--emit-html", "browse.html", "--title", "Photographs")
+# --view all, because everything below is about the photo grid itself - the
+# sort, the zoom, the sticky bar, the lightbox. The folder index that a
+# published page opens on has its own suite in _selftest_folders.py.
+rc, _ = run("--dry-run", "--emit-html", "browse.html", "--title", "Photographs",
+            "--view", "all")
 page_path = OUT / "browse.html"
 check("preview page emitted", rc == 0 and page_path.exists())
 

@@ -300,8 +300,39 @@ existing install:
 - **transformers 5.x.** If you are on 4.x this is a major-version upgrade.
   Photo Scout runs on both, but 5.10 is the first release clear of open
   advisories, so that is the floor.
-- **torch 2.13.** Reinstall it with the CUDA index URL above, not a bare
+- **torch 2.13.** Reinstall it with a CUDA index URL, not a bare
   `pip install --upgrade torch`, or you will quietly land on the CPU build.
+
+**Upgrading an existing install? Do torch LAST.** The opposite of a fresh
+install, and the order matters:
+
+```bash
+pip install -r requirements.txt                  # may pull a CPU torch; let it
+pip install torch --index-url https://download.pytorch.org/whl/cu130   # then overwrite it
+```
+
+Torch is listed in `requirements.txt`, so if the version you have is below the
+floor, `pip install -r requirements.txt` will fetch a newer one from PyPI —
+where every wheel is CPU-only. Installing CUDA torch first does not help:
+requirements.txt is read afterwards and undoes it. Going last is what makes the
+CUDA index the final word.
+
+Not every CUDA index carries every release. Ask before you install, and move up
+a CUDA version if the one you are on has fallen behind:
+
+```bash
+pip index versions torch --index-url https://download.pytorch.org/whl/cu130
+```
+
+Then check `nvidia-smi` — a CUDA 13 wheel needs a recent driver, and against an
+older one torch imports cleanly and only fails when it first touches the GPU.
+
+Whatever route you take, the check that matters is the same. It must end in
+`True`, and the version must carry a `+cu` suffix:
+
+```bash
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
 
 Check the state of your own environment at any time:
 
@@ -484,9 +515,13 @@ Either way it is one-time, free, and resumable.
 
 Everything lands in `_photo_scout/` beside the script (override with `--out`):
 
-- **`report.html`** — the master report. A dark contact sheet of every photo with
-  its thumbnail, verdict badge, score and one-sentence feedback. Click a thumbnail
-  to open it full-window in the lightbox. Filter buttons for TOP PICK / STRONG /
+- **`report.html`** — the master report. It opens on an index of your folders,
+  each one a tile carrying a mosaic of its four best frames, its name, how many
+  are inside and the year; click one to open it, **‹ All folders** to come back,
+  and **All photos** for the flat contact sheet of everything. Whichever you
+  choose is remembered. A card shows its thumbnail, verdict badge, score and
+  one-sentence feedback; click a thumbnail to open it full-window in the
+  lightbox. Filter buttons for TOP PICK / STRONG /
   MAYBE / PASS, a checkbox to reveal near-duplicates, and a search box for folder
   or filename. Under each thumbnail the folder takes one line and the capture date,
   time and pixel dimensions the next — dimensions because resolution is deliberately
@@ -534,6 +569,33 @@ Both reports and the published page work the same way on a touchscreen:
 - On the published page, the lightbox has **its own heart** showing that
   photograph's tally. Liking from either place updates both, and the sort key
   behind "Most liked" with it.
+
+### Folders, and why the report opens fast
+
+The local report and the published gallery now work the same way, and share the
+same code for deciding what counts as one folder: only the top level, with any
+date stripped off, so `2010-03-12 - Arches National Park` and its `Publish`
+subfolder are one gallery called *Arches National Park*. Anything loose at the
+top of the library collects under **Unfiled**, always last.
+
+The sort box serves both views and each keeps its own choice. The index has no
+**Score** and no **File name**, a folder having neither of its own; inside a
+folder there is no **Folder A–Z / Z–A**, every photograph in there sharing it.
+The folder picker in the toolbar is put away in the folder view — the tiles are
+the folders — and comes back in **All photos**, where it is the only way to
+narrow to one. `--view all` builds a report that opens flat, and
+`--folder-outline "#b09468"` changes the tile colour; a colour too dark to see
+against the card is lifted, keeping its hue, until it clears the 3:1 contrast
+floor a border needs to be visible at all.
+
+Underneath, a card is not built until the folder holding it is opened. Every
+card is still written by Python, but into a `<template>`, which a browser parses
+and then leaves alone — no styles resolved, no layout. On a 4,234-photograph
+library that is 642 elements at load instead of 91,472, and the report opens in
+about a quarter of the time. Opening the largest folder in that library, 479
+photographs, takes under half a second on a deliberately slowed machine. The
+filters run on the data rather than on the grid, so a search from the index
+still finds photographs in folders you have never opened.
 
 ### The lightbox
 
@@ -783,6 +845,30 @@ database is skipped on re-runs, so you can Ctrl+C mid-library and continue later
 
 ---
 
+### When a video still was shot
+
+A clip records the moment it started, and Photo Scout reads it — one header
+read per clip, nothing decoded — then adds each frame's own offset. So two
+stills pulled from one long clip carry different times and sort apart, and a
+video still sits among your photographs in date order rather than falling to
+the bottom.
+
+It shows up wherever a capture date does: the local report, the Ghost gallery,
+the CSV, and the date sorts in both.
+
+A clip that recorded no date stays undated rather than being given a guess, and
+sinks to the bottom of a date sort like any undated photograph. A dead camera
+clock — the 1904 and 1970 stamps some cameras write — is treated as no date at
+all. The time is taken as the camera's clock read it and is **not** converted
+between time zones, the same way an EXIF capture time is: shifting an evening
+shoot to UTC would file it in the small hours of the next day.
+
+**Already scored a library?** You do not need to re-scan. The dates are filled
+in from the clips the next time reports are built, including by `--report-only`,
+which costs one header read per clip and no scoring at all.
+
+---
+
 ## 9. Tagging
 
 Every card has a text box under it. Type a word or phrase and press **Enter** or
@@ -930,6 +1016,14 @@ duplicates and a full rescore re-uploads nothing that has not actually changed. 
 published page carries the same searching, sorting and browser-side tagging as the
 local report.
 
+**Worth knowing before you publish:** the page shows each photograph's file name
+and its folder, and the folder galleries are named after your top-level folders.
+Anyone who can see the page can read those names. The rest of the path never
+leaves your machine — no drive letter, nothing above the library, and no link
+back to your disk — but if a folder is named after a client, a child or an
+address, that name goes up with the photographs. Rename the folder, or don't
+publish it.
+
 ### Getting a Ghost Admin API key
 
 In Ghost admin: **Settings → Advanced → Integrations → Add custom integration**.
@@ -1002,6 +1096,66 @@ python photo_scout_ghost.py --site https://example.com --dry-run --emit-html pre
 If the key is wrong you will get `Admin API key must look like <id>:<hex secret>`
 before anything is uploaded — see [section 12](#12-troubleshooting).
 
+### Folder galleries
+
+The published page opens on an index of your folders rather than on several
+hundred photographs at once. Each folder gets a tile carrying a mosaic of its
+four highest-scoring frames, its name, how many are inside and the year; click
+one to open that folder, and **‹ All folders** to come back. **All photos** in
+the toolbar switches to the flat single-page gallery, and whichever a visitor
+chooses is remembered in their browser.
+
+Folders are listed A–Z by name with the date stripped off, so a library filed as
+`2010-03-12 - Arches National Park` reads as *Arches National Park*. A subfolder
+merges into its parent — `Arches National Park\Publish` is part of the Arches
+gallery, not a gallery of its own — so a shoot appears once rather than split
+between the frames you kept and the frames you chose from. Inside a merged
+gallery the subfolder is still named on each card; the parent's own photographs
+drop the label, having nothing to add. Anything sitting loose at the top of your
+library collects under **Unfiled**, always last.
+
+The sort box serves both views and each keeps its own choice, so moving between
+them never quietly reorders the other. On the index it orders the tiles, opening
+on Folder A–Z: Date ranks folders by their newest photograph, Most liked by
+their total likes, and File name falls back to the folder's name, which is the
+only name a tile has. Unfiled sits at the end of every ordering.
+
+Each view also drops the orderings that say nothing in it. The index has no
+**Score** and no **File name**, because a folder is not a photograph and has
+neither of its own; inside a folder there is no **Folder A–Z / Z–A**, because
+every photograph in there shares it. All photos offers the lot.
+
+Tiles are drawn as folders — a tab on the left, the covers inset so the card
+shows around them. The card itself is the same dark panel as every other card
+on the page; only the folder shape is coloured, in a manila tan pitched at the
+same weight as the muted grey already used for dates and counts, so it reads as
+part of the same family rather than as a highlight. `--folder-outline "#b09468"`
+changes it, and a colour too dark to see against that panel is lifted — keeping
+its hue — until it clears the 3:1 floor a border needs to be visible at all. Where a heart
+service is running, a tile also carries that folder's total likes, and shows
+nothing at all when it has none.
+
+A tile's mosaic crops every frame to a landscape window, so a portrait
+photograph fills its cell rather than stretching the tile, and every tile in a
+row is the same height. Folders with fewer than four photographs use the whole
+tile rather than leaving holes in a 2×2.
+
+Everything else keeps working across both views. The band buttons, search, tag
+chips and **Liked** filter act on photographs wherever you are: in the index they
+leave only folders that still contain a match, and each tile's mosaic updates to
+the matching photographs, so a search for *night* leaves every folder wearing its
+best night frame. Inside a folder the lightbox walks that folder only and stops
+at its edges, and the sort box drops its Folder A–Z and Folder Z–A options,
+which sort nothing when every photograph shares the folder. `--view all` publishes a page that opens flat instead.
+
+A folder's photographs are built into the page when you open that folder, not
+when the page loads, and the filters run on the published data rather than on
+what is on screen — so a search in the index still finds photographs in folders
+nobody has opened. The index therefore costs about the same whatever the library
+holds: ten thousand photographs open in roughly nine thousand elements instead of
+a hundred and seventy thousand. **All photos** is the one view that does build
+everything, which is what you asked it for.
+
 ### Fitting the gallery to your theme
 
 The page is one self-contained block dropped into a normal Ghost page, so it
@@ -1014,6 +1168,8 @@ inherits whatever spacing your theme gives its content. Three flags adjust the f
 | `--gap 8` | Space above and below the gallery (default 8). Themes often set a large margin here — Ghost's own default is `max(12vmin, 64px)`, which is a visible hole on a tall screen. This replaces it. Negative values tuck the gallery up closer |
 | `--max-width 1800` | How wide the grid may grow, in pixels |
 | `--column-width 260` | Minimum column width; smaller means more columns |
+| `--view all` | Open the gallery flat, every photograph on one page, instead of on the folder index. A visitor can switch either way whatever this is set to |
+| `--folder-outline "#b09468"` | Outline colour of the folder tiles. The tiles keep the page's own background; a colour too dark to see against it is lifted until it is |
 | `--insecure-http` | Allow a plain `http://` site or heart endpoint. Refused by default: the Admin API key is full write access to your site, and http puts it on the wire in the clear. Loopback addresses are exempt without the flag |
 
 A page still needs a name in Ghost's admin list, so when `--title` is blank it is
@@ -1196,7 +1352,7 @@ Full detail — ground rules, how to run the tests, style — is in
 anything inside `--root`. This is the one rule with no exceptions, and
 `tests/_selftest_readonly.py` exists to prove it.
 
-**Prove it, don't assert it.** Fifteen suites live in `tests/`; run them with
+**Prove it, don't assert it.** Sixteen suites live in `tests/`; run them with
 `for t in tests/_selftest*.py; do python "$t"; done`. Several real bugs here were
 caught only because a test drove an actual browser rather than inspecting the
 generated HTML. When you fix something, add the test that would have caught it, and

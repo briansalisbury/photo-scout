@@ -280,6 +280,10 @@ with sync_playwright() as pw:
     P = b.new_context(has_touch=True).new_page()
     P.set_viewport_size({"width": 1500, "height": 950})
     P.goto((OUT / "report.html").resolve().as_uri()); P.wait_for_timeout(500)
+    # The report opens on the folder index, where no card exists yet. Everything
+    # below is about the cards themselves - their layout, their sort order - so
+    # it belongs in All photos. The index has its own suite.
+    P.click("#views button[data-view='all']"); P.wait_for_timeout(400)
 
     print("\n--- a very long folder name hides nothing else")
     # The folder is allowed to clip; the date, time and resolution beneath it
@@ -487,6 +491,10 @@ with sync_playwright() as pw:
           ncols() >= 3, f"{ncols()} columns at {colw()}")
     P.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
     P.reload(); P.wait_for_timeout(500)
+    # Clearing storage also cleared the remembered view, so the report is back
+    # on the folder index and the grid is not on screen. The column count below
+    # is a question about the grid.
+    P.click("#views button[data-view='all']"); P.wait_for_timeout(400)
     check("and a phone starts two-up rather than one enormous column",
           ncols() == 2, str(ncols()))
     check("the header stays pinned while the grid scrolls",

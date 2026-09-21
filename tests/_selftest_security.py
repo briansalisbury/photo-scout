@@ -135,6 +135,133 @@ if block:
 
 
 # ---------------------------------------------------------------------------
+print("\n=== nor by a folder name ===")
+# Folder names reach further than file names do: the folder index puts them in
+# a <script> block as JSON, in a tile label, and in the "open folder" link as a
+# file:/// URL. A folder arrives on a disk rather than from the photographer's
+# keyboard, and on Linux and macOS it may legally hold quotes and angle
+# brackets, so each of those three is a place a name could get out.
+EVIL_LIB = Path("/tmp/sec_evil"); EVIL_OUT = Path("/tmp/sec_evil_out")
+for d in (EVIL_LIB, EVIL_OUT):
+    shutil.rmtree(d, ignore_errors=True)
+
+# A folder name cannot hold '/', so a literal '</script>' is impossible here;
+# these are what a folder CAN be called. The double-quote is the one that
+# matters most - it ends an HTML attribute, and the "open folder" URL is one.
+EVIL_FOLDERS = [
+    '2011-01-01 - <!--<script>window.PWNED=1;<',
+    '2011-02-02 - "><script>window.PWNED=2<',
+    "2011-03-03 - '+window.PWNED=3+'",
+    '2011-04-04 - <img src=x onerror="window.PWNED=4">',
+]
+made = []
+if os.name != "nt":
+    for name in EVIL_FOLDERS:
+        try:
+            d = EVIL_LIB / name
+            d.mkdir(parents=True)
+        except OSError:
+            continue             # some filesystems refuse it; not a failure
+        for i in range(2):
+            Image.fromarray(rng.integers(0, 255, (10, 15, 3), dtype=np.uint8)) \
+                 .resize((800, 560), Image.BICUBIC) \
+                 .save(d / f"DSC_{i:04d}.JPG", "JPEG", quality=90)
+        made.append(name)
+
+if not made:
+    print("SKIP  this filesystem would not take a hostile folder name")
+else:
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        ps.main(["--root", str(EVIL_LIB), "--out", str(EVIL_OUT)])
+    ev = (EVIL_OUT / "report.html").read_text(encoding="utf-8")
+
+    groups = re.search(r"const GROUPS = (.*?);\n", ev, re.S)
+    check("the report embeds a GROUPS block", groups is not None)
+    if groups:
+        raw = groups.group(1)
+        # The two sequences that change where an HTML parser thinks the script
+        # ends. Neither can appear in valid JSON outside a string, and both
+        # survive escaping as the same string, so removing them costs nothing.
+        check("the script block cannot be closed early",
+              "</" not in raw and "<!--" not in raw, raw[:160])
+        check("and the folder names are all still there",
+              len(json.loads(raw)) == len(made), raw[:160])
+
+    # The one attribute that used to interpolate a path without escaping it.
+    urls = re.findall(r'data-folderurl="([^"]*)"', ev)
+    check("every folder URL survived as one attribute",
+          len(urls) == 2 * len(made), f"{len(urls)} for {len(made)} folders")
+    check("and none of them carries a live quote or bracket",
+          not any(c in u for u in urls for c in '"<>'), str(urls[:1]))
+    check("the same goes for the open-folder links",
+          not re.search(r'<a href="file:[^"]*[<>]', ev))
+    # Inside the JSON block a bare '<script' is inert text: only '</' and
+    # '<!--' move an HTML parser out of script data, and both are gone above.
+    # Everywhere else the name is markup, and there it must be escaped.
+    markup = ev.replace(groups.group(1), "") if groups else ev
+    check("no folder name became live markup",
+          "<script>window.PWNED" not in markup and "<img src=x" not in markup)
+    check("and in the markup the names are escaped, not live",
+          "&lt;img src=x onerror=" in markup)
+
+    from playwright.sync_api import sync_playwright        # noqa: E402
+    dialogs, page_errors = [], []
+    with sync_playwright() as _pw:
+        _br = _pw.chromium.launch()
+        _pg = _br.new_context().new_page()
+        _pg.on("dialog", lambda d: (dialogs.append(d.message), d.dismiss()))
+        _pg.on("pageerror", lambda e: page_errors.append(str(e)))
+        _pg.goto((EVIL_OUT / "report.html").resolve().as_uri())
+        _pg.wait_for_timeout(700)
+        seen = _pg.evaluate("""() => ({
+            pwned: window.PWNED ?? null,
+            scripts: document.querySelectorAll('script').length,
+            strayImgs: [...document.querySelectorAll('img')]
+                         .filter(i => i.getAttribute('src') === 'x').length,
+            tiles: document.querySelectorAll('.fold').length,
+            // A label must be TEXT. Any element inside one means a name was
+            // parsed as markup rather than written as characters.
+            labelKids: [...document.querySelectorAll('.fold .foldname')]
+                         .reduce((n, e) => n + e.children.length, 0)})""")
+        check("nothing in a folder name executed", seen["pwned"] is None,
+              str(seen["pwned"]))
+        check("the page has exactly its own one script", seen["scripts"] == 1,
+              str(seen["scripts"]))
+        check("no element was smuggled in", seen["strayImgs"] == 0)
+        check("the index still built every tile", seen["tiles"] == len(made),
+              f"{seen['tiles']} of {len(made)}")
+        check("and every label is text, not markup", seen["labelKids"] == 0)
+        _pg.click(".fold"); _pg.wait_for_timeout(400)
+        check("a folder still opens", _pg.eval_on_selector_all(
+            ".card", "e => e.length") > 0)
+        check("no dialog was raised", not dialogs, str(dialogs[:2]))
+        check("and no page errors", not page_errors, "; ".join(page_errors[:2]))
+        _br.close()
+
+# The tile colour is written into the stylesheet, so it is the other new way in.
+print("\n=== the folder outline cannot carry CSS ===")
+for bad in ("red;}body{display:none}.x{", "#b09468;}*{display:none", "</style>",
+            "expression(alert(1))", ""):
+    check(f"refused: {bad!r}", not ps.outline_ok(bad))
+for good in ("#b09468", "#b96", "b09468", "  #B09468  "):
+    check(f"accepted: {good!r}", ps.outline_ok(good))
+# Whatever comes out is rebuilt from parsed numbers, never from the input text.
+for value in ("#b09468", "#000", "#2e6f4f"):
+    pal = ps.folder_palette(value)
+    check(f"{value}: both colours are plain hex",
+          all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in pal.values()), str(pal))
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = ps.main(["--root", str(LIB), "--out", str(OUT), "--report-only",
+                  "--folder-outline", "red;}body{display:none}.x{"])
+check("and the script stops rather than writing it", rc == 2, f"rc={rc}")
+check("with a sentence, not a traceback",
+      "is not a colour" in buf.getvalue() and "Traceback" not in buf.getvalue(),
+      buf.getvalue()[:160])
+
+
+# ---------------------------------------------------------------------------
 print("\n=== the model checkpoint is pinned ===")
 # A checkpoint is loaded into a model, not merely read, so it is the one
 # download worth verifying. file:// stands in for the real host.

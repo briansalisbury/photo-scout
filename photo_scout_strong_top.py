@@ -86,6 +86,7 @@ import sys
 import time
 import traceback
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path, PurePath
 from typing import Iterable, Optional
 
@@ -862,6 +863,100 @@ def probe_duration(path: Path) -> Optional[float]:
         return float(out.stdout.strip())
     except Exception:
         return None
+
+
+# A camera writes the moment it started recording into the container. Several
+# spellings exist; these are the ones that appear in practice, most specific
+# first. The Apple tag is preferred because it carries a real UTC offset and so
+# says what the clock on the wall read; the others are nominally UTC and in
+# practice are whatever the camera felt like writing.
+VIDEO_DATE_TAGS = (
+    "format_tags=com.apple.quicktime.creationdate",
+    "format_tags=creation_time",
+    "format_tags=date",
+    "stream_tags=creation_time",
+)
+
+
+def _parse_video_date(raw: str) -> Optional[str]:
+    """
+    'YYYY-MM-DD HH:MM:SS' from whatever spelling the container used, or None.
+
+    Deliberately NOT converted between time zones. An EXIF capture time is a
+    naive local reading and is displayed as one, so a clip has to be treated the
+    same way or the two would disagree about the same afternoon. Where the tag
+    carries an offset it is dropped rather than applied, for the same reason:
+    'the camera's clock said 18:23' is the useful fact, and shifting it to UTC
+    would put an evening shoot in the small hours of the next day.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    # 2019-07-04T18:23:11.000000Z, 2019-07-04T18:23:11-0600, 2019-07-04 18:23:11
+    m = re.match(r"(\d{4})[-:](\d{2})[-:](\d{2})[T ](\d{2}):(\d{2}):(\d{2})", raw)
+    if not m:
+        return None
+    y, mo, d, hh, mi, ss = (int(x) for x in m.groups())
+    # A camera with a dead clock writes 1904 or 1970; neither is a date anybody
+    # wants sorted in among real ones.
+    if not (1970 < y < 2200 and 1 <= mo <= 12 and 1 <= d <= 31 and
+            hh < 24 and mi < 60 and ss < 60):
+        return None
+    return f"{y:04d}-{mo:02d}-{d:02d} {hh:02d}:{mi:02d}:{ss:02d}"
+
+
+def probe_video_created(path: Path) -> Optional[str]:
+    """
+    When the clip was recorded, as 'YYYY-MM-DD HH:MM:SS', or None.
+
+    One ffprobe call, once per clip - not per sampled frame - so the cost is a
+    few milliseconds against a scoring run measured in minutes. Nothing is
+    decoded; only the container header is read.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", ":".join(VIDEO_DATE_TAGS),
+             "-of", "default=noprint_wrappers=1", str(path)],
+            capture_output=True, text=True, timeout=60,
+        )
+    except Exception:
+        return None
+    found = {}
+    for line in out.stdout.splitlines():
+        key, _, val = line.partition("=")
+        key = key.strip()
+        # ffprobe prints tags as 'TAG:creation_time=...', and prints the same
+        # prefix whether the tag came from the container or from the stream, so
+        # the two are told apart by name rather than by section.
+        if key[:4].upper() == "TAG:":
+            key = key[4:]
+        if val.strip():
+            found.setdefault(key.lower(), val)
+    # Same precedence as the list above: the first spelling that parsed wins.
+    for spec in VIDEO_DATE_TAGS:
+        got = _parse_video_date(found.get(spec.split("=", 1)[1].lower(), ""))
+        if got:
+            return got
+    return None
+
+
+def frame_taken_at(created: Optional[str], offset_s: float) -> Optional[str]:
+    """
+    When a frame `offset_s` into a clip was actually shot.
+
+    The clip's start plus the frame's own position, so two stills pulled from
+    one long clip sort apart rather than sharing a timestamp. None in, None out:
+    a date is never invented for a clip that did not record one.
+    """
+    if not created:
+        return None
+    try:
+        base = datetime.strptime(created, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    return (base + timedelta(seconds=max(0.0, offset_s))).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def sample_video_frames(video: Path, work_dir: Path,
@@ -1991,7 +2086,13 @@ def _score_one(img: Image.Image, res: PhotoResult, scorer, out_dir: Path,
 
     # img.info survives the copy/thumbnail above, but read it from the
     # original to be explicit about where the metadata came from.
-    res.taken_at = img.info.get("psc_taken")
+    #
+    # Only when there is one. A sampled video frame arrives with its date
+    # already worked out from the clip it came from, and the proxy JPEG carries
+    # no EXIF of its own - assigning unconditionally would wipe it.
+    taken = img.info.get("psc_taken")
+    if taken:
+        res.taken_at = taken
     native = img.info.get("psc_native")
     if native and not res.width:
         res.width, res.height = int(native[0]), int(native[1])
@@ -2087,6 +2188,9 @@ def run_scoring(root: Path, out_dir: Path, cache: Cache, args) -> None:
                 continue
             try:
                 duration = probe_duration(p)
+                # Once per clip, before the frames are sampled. Every frame
+                # below is dated from this one reading plus its own offset.
+                created = probe_video_created(p)
                 frames = sample_video_frames(p, frame_work, every=args.video_every)
             except Exception as exc:
                 bad = PhotoResult(path=str(p), rel_path=str(rel), folder=folder,
@@ -2116,6 +2220,11 @@ def run_scoring(root: Path, out_dir: Path, cache: Cache, args) -> None:
                     source_type="video_frame",
                     source_video=str(p),
                     timestamp_s=ts,
+                    # When this frame was actually shot: the clip's start plus
+                    # how far into it this one sits. None when the camera
+                    # recorded no date, which sorts to the bottom like any
+                    # other undated photograph.
+                    taken_at=frame_taken_at(created, ts),
                     # The clip's dimensions, because that is what an extracted
                     # still will be. The proxy JPEG being scored is smaller.
                     width=vsize[0] if vsize else None,
@@ -2325,10 +2434,16 @@ def _to_url_path(p: str) -> str:
     PurePath silently picks the wrong flavour when they disagree.
     """
     s = p.replace("\\", "/").lstrip("/")
-    # Percent-encode the characters that actually break href parsing.
-    for ch, enc in ((" ", "%20"), ("#", "%23"), ("?", "%3F"), ("%", "%25")):
-        if ch == "%":
-            continue  # skip; encoding % first would double-encode the others
+    # Percent itself goes first, or the encodings added below would be encoded
+    # a second time on the next pass.
+    s = s.replace("%", "%25")
+    # Then the characters that break an href, and the ones that would end the
+    # attribute or the tag it sits in. A folder name is not something the
+    # photographer typed: it arrives on a disk, and on Linux and macOS it may
+    # legally contain quotes and angle brackets. The caller escapes this for
+    # HTML as well - this is the first of the two, not the only one.
+    for ch, enc in ((" ", "%20"), ("#", "%23"), ("?", "%3F"), ('"', "%22"),
+                    ("'", "%27"), ("<", "%3C"), (">", "%3E"), ("`", "%60")):
         s = s.replace(ch, enc)
     return s
 
@@ -2390,8 +2505,12 @@ HTML_TEMPLATE = r"""<!doctype html>
  .stats { color:#9a9a9a; font-size:13px; margin-bottom:10px; }
  .stats b { color:#e8e8e8; }
  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+ /* font-family:inherit because form controls do not inherit a font by
+    default - they fall back to the browser's own, Arial on most systems,
+    which sits visibly apart from the Segoe UI around it. */
  button, select, input { background:#242424; color:#e8e8e8; border:1px solid #3a3a3a;
-   border-radius:6px; padding:6px 11px; font-size:13px; cursor:pointer; }
+   border-radius:6px; padding:6px 11px; font-size:13px; font-family:inherit;
+   cursor:pointer; }
  button.on { background:#2f6f4f; border-color:#3f8f68; }
  :root { --colw: 300px; }
  main { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--colw),1fr)); gap:14px; padding:18px; }
@@ -2528,6 +2647,108 @@ HTML_TEMPLATE = r"""<!doctype html>
  #lb.no-image #lb-img { display:none; }
  #lb.no-image #lb-missing { display:block; }
 
+ /* ==== the folder index ====================================================
+    The same index the published gallery opens on. Tiles are shaped like
+    folders: a tab up on the left, then the body, with the covers inset so a
+    margin of the folder's own card shows around them. */
+ #views { display:inline-flex; }
+ #views button { border-radius:0; margin:0; }
+ #views button:first-child { border-radius:6px 0 0 6px; }
+ #views button:last-child { border-radius:0 6px 6px 0; border-left-width:0; }
+ /* The folder picker says nothing in the folder view: on the index the tiles
+    ARE the folders, and inside one you are already in a folder. It comes back
+    in All photos, which is the only place it can narrow anything, and your
+    choice there is remembered while you are away. */
+ body.view-folders #folder { display:none; }
+
+ #folders { display:none; gap:14px; padding:18px; --tab:13px;
+   --fold-line:__FOLDLINE__; --fold-line-hover:__FOLDLINEHOVER__;
+   /* The tab hangs above each tile, so the rows need that much more between
+      them or one row's tab overlaps the tile above it. */
+   row-gap:calc(14px + var(--tab));
+   grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--colw)),1fr)); }
+ body.view-folders #folders { display:grid; }
+ body.view-folders main { display:none; }
+ /* Inside a folder the index goes away and the ordinary grid comes back. */
+ body.view-folders.folder-open #folders { display:none; }
+ body.view-folders.folder-open main { display:grid; }
+
+ /* flex-column rather than block: a button centres its contents vertically by
+    default, which leaves a gap above the mosaic on any tile shorter than its
+    row and stops the covers lining up across the grid. */
+ .fold { background:#1b1b1b; border:1px solid var(--fold-line);
+   border-radius:0 10px 10px 10px; cursor:pointer; text-align:left;
+   padding:0; color:inherit; font:inherit; width:100%; position:relative;
+   margin-top:var(--tab); display:flex; flex-direction:column;
+   align-items:stretch; }
+ /* The tab ends exactly where the body's top edge does, covering that edge
+    so the two read as one piece of card. border-box, so the height means the
+    same thing whatever box-sizing rule a page applies to everything: any
+    taller and the tab's side lines run on into the body. */
+ .fold::before { content:''; position:absolute; left:-1px;
+   top:calc(-1px - var(--tab)); width:46%; max-width:150px;
+   box-sizing:border-box; height:calc(var(--tab) + 1px); background:#1b1b1b;
+   border:1px solid var(--fold-line); border-bottom:none;
+   border-radius:8px 8px 0 0;
+   /* One more pixel of card below the tab, inset from its side lines. At a
+      zoom that is not a whole number the tab's edge rounds to a pixel boundary
+      and can stop a fraction short of covering the line beneath it; this
+      covers that fraction without lengthening the tab's own sides. */
+   box-shadow:0 2px 0 -1px #1b1b1b; }
+ /* The overflow has to live here rather than on the tile: on the tile it
+    would clip the tab away. */
+ .fold > .mosaic { margin:6px 6px 0; border-radius:5px; overflow:hidden; }
+ /* Only the edge catches the light. Lifting the whole card would make the tile
+    flash, which is a lot of movement for a hover. */
+ .fold:hover, .fold:hover::before { border-color:var(--fold-line-hover); }
+ .fold:focus-visible { outline:2px solid #3f8f68; outline-offset:2px; }
+
+ /* Four thumbnails on the same 3:2 footprint a single card image uses.
+
+    minmax(0,1fr) rather than 1fr on every track, and min-width/min-height:0 on
+    the images. A plain 1fr is minmax(auto,1fr), and that auto floor is the
+    image's own min-content size - so one portrait photograph stretches its row
+    to the full height of the photograph, the aspect-ratio is overruled, and
+    the tile grows to several times the height of its neighbours. Zeroing the
+    floor is what lets object-fit:cover crop instead. */
+ .mosaic { display:grid; gap:2px; aspect-ratio:3/2; overflow:hidden;
+   background:#1b1b1b;
+   grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+   grid-template-rows:minmax(0,1fr) minmax(0,1fr); }
+ .mosaic img { width:100%; height:100%; min-width:0; min-height:0;
+   object-fit:cover; display:block; background:#1b1b1b; }
+ /* One fills the tile, two stack as full-width bands, three put the odd one
+    along the bottom. No cell is ever taller than it is wide, whatever shape
+    the photographs are. */
+ .mosaic.n1 img { grid-column:1/3; grid-row:1/3; }
+ .mosaic.n2 img { grid-column:1/3; }
+ .mosaic.n3 img:nth-child(3) { grid-column:1/3; }
+ /* Two lines, then an ellipsis. Folder names run long and a tile that grew to
+    fit one would drag its whole row with it; the full name is on the title. */
+ .foldname { font-weight:600; font-size:13px; padding:9px 11px 0;
+   overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2;
+   line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+ /* margin-top:auto pins the count to the bottom, so the counts across a row
+    sit on one line however the names above them wrapped. */
+ .foldmeta { color:#9a9a9a; font-size:11.5px; padding:3px 11px 11px;
+   margin-top:auto; display:flex; align-items:baseline; gap:8px; }
+
+ /* Inside a gallery, a card whose folder is just the gallery's own name has
+    nothing to add by repeating it. A card from a merged subfolder keeps its
+    label, because there the folder still says something. */
+ body.view-folders.folder-open .card[data-samefolder="1"] .folder { display:none; }
+
+ /* The header that replaces the index once a folder is open. */
+ #crumb { display:none; align-items:center; gap:10px; padding:14px 20px 0; }
+ body.view-folders.folder-open #crumb { display:flex; }
+ #crumb h2 { margin:0; font-size:15px; font-weight:600; overflow-wrap:anywhere; }
+ #crumb #back { flex:none; }
+ #crumbn { color:#9a9a9a; font-size:12.5px; margin-left:auto; flex:none; }
+ /* Shown instead of the tiles when a search matches nothing anywhere. */
+ #empty { display:none; color:#9a9a9a; padding:26px 20px; text-align:center; }
+ @media (max-width:600px) { #folders { gap:8px; padding:10px;
+   row-gap:calc(8px + var(--tab)); } }
+
  /* Last in the sheet on purpose: a media query carries no extra specificity,
     so any of these declared later would win.
     iOS Safari zooms the whole page when a text field smaller than 16px takes
@@ -2544,6 +2765,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button data-f="all" class="on">All</button>
     <button data-f="TOP PICK">Top picks</button>
     <button data-f="STRONG">Strong</button>
+    <span id="views">
+      <button type="button" data-view="folders">Folders</button>
+      <button type="button" data-view="all">All photos</button>
+    </span>
     <select id="folder" style="margin-left:10px;max-width:340px">__FOLDER_OPTIONS__</select>
     <select id="sort" title="Sort order">
       <option value="score-desc">Score, highest first</option>
@@ -2604,14 +2829,104 @@ HTML_TEMPLATE = r"""<!doctype html>
   </div>
   <div id="lb-note"></div>
 </div>
-<main id="grid">
+<div id="crumb">
+  <button id="back" type="button">&lsaquo; All folders</button>
+  <h2></h2><span id="crumbn"></span>
+</div>
+<div id="folders"></div>
+<div id="empty">Nothing matches. Clear the search or pick another band.</div>
+<!-- Every card, written by Python exactly as it always was, but parked in a
+     template rather than in the grid. A template's contents are parsed and
+     nothing more: no styles are resolved and no layout is done for them, which
+     is where the time went on a large report. Opening a folder moves that
+     folder's cards out of here and into the grid, where they become real. -->
+<template id="cardsrc">
 __CARDS__
-</main>
+</template>
+<main id="grid"></main>
 <footer>Generated by <a href="__PROJECT_URL__" target="_blank" rel="noopener">Photo Scout</a> &middot; scores are model estimates, not verdicts &mdash; trust your eye.&trade;</footer>
 <script>
  const grid = document.getElementById('grid');
  const qEl = document.getElementById('q');
- const cards = [...grid.children];
+
+ // ==== the model ============================================================
+ // Every card is written by Python and parked in a template. A template's
+ // contents are parsed and nothing else - no styles resolved, no layout - so a
+ // four-thousand-photograph report costs a fraction of what it did to open.
+ // Opening a folder MOVES that folder's cards out of the template and into the
+ // grid, where they become real.
+ //
+ // Which means nothing may ask the grid what the library contains. The fields
+ // the filters, the tiles and the counter need are read off the template once,
+ // here, into plain arrays; from then on every pass runs on those.
+ const SRC = [...document.getElementById('cardsrc').content.children];
+ const GROUPS = __GROUPS_JSON__;
+ const N = SRC.length;
+ const F_VERDICT = [], F_DUP = [], F_KIND = [], F_TOP = [], F_GROUP = [],
+       F_SEARCH = [], F_DATE = [], F_SCORE = [], F_NAME = [], F_FOLDER = [],
+       F_THUMB = [], F_KEY = [];
+ SRC.forEach((c, i) => {
+   const d = c.dataset;
+   d.idx = i;
+   F_VERDICT.push(d.verdict); F_DUP.push(d.dup); F_KIND.push(d.kind);
+   F_TOP.push(d.foldertop); F_GROUP.push(+d.group); F_SEARCH.push(d.search);
+   F_DATE.push(d.date || ''); F_SCORE.push(parseFloat(d.sortscore) || 0);
+   F_NAME.push(d.name || ''); F_FOLDER.push(d.folder || '');
+   F_THUMB.push(d.thumb || ''); F_KEY.push(d.tagkey);
+ });
+ // 1 where the photograph passes the current filters.
+ const MATCH = new Uint8Array(N);
+ // Which photographs are in which gallery, as indices. Indices rather than
+ // elements: a folder is counted, covered and sorted long before anybody opens
+ // it, and until they do it has no card in the page.
+ const byGroup = GROUPS.map(() => []);
+ F_GROUP.forEach((g, i) => byGroup[g].push(i));
+
+ // Whether card i has been moved into the grid yet.
+ const built = new Uint8Array(N);
+ // The cards that currently exist, in the order the grid shows them.
+ const liveCards = () => [...grid.children];
+
+ // Which view, and which gallery is open - an index into GROUPS, or -1 for the
+ // index itself. Remembered per report file, the same as the tags are.
+ const VIEW_KEY = '__STORAGE_KEY___view';
+ let view = '__VIEW__', openGroup = -1;
+ try {
+   const s = localStorage.getItem(VIEW_KEY);
+   if (s === 'all' || s === 'folders') view = s;
+ } catch (e) {}
+ const inIndex = () => view === 'folders' && openGroup < 0;
+ // One sort box serves both views and each keeps its own choice, so moving
+ // between them never quietly reorders the other. The index opens on A-Z
+ // because that is the order folders are meant to read in; a folder opens on
+ // the best photographs first, the same as the flat grid.
+ let indexSort = 'folder-asc', photoSort = 'score-desc';
+
+ function ensureCards(list) {
+   const frag = document.createDocumentFragment();
+   const made = [];
+   for (const i of list) {
+     if (built[i]) continue;
+     built[i] = 1;
+     frag.appendChild(SRC[i]);        // moved, not copied
+     made.push(SRC[i]);
+   }
+   if (!made.length) return made;
+   grid.appendChild(frag);
+   for (const c of made) { renderCardTags(c); wireTagInput(c); }
+   return made;
+ }
+
+ // The cards the current view actually needs. The index needs none: it is
+ // drawn from the arrays above, and opening a folder is what brings that
+ // folder's photographs into the page.
+ let ALLIDX = null;
+ function ensureView() {
+   let list = null;
+   if (view === 'all') list = (ALLIDX ||= [...Array(N).keys()]);
+   else if (openGroup >= 0) list = byGroup[openGroup];
+   if (list && ensureCards(list).length) sortCards(photoSort);
+ }
 
  // ==== thumbnail size =======================================================
  // Ctrl+scroll zooms the page, which magnifies one column rather than showing
@@ -2756,11 +3071,24 @@ __CARDS__
      });
      list.insertBefore(chip, input);
    }
-   // Pipe-delimited so an exact chip match cannot hit a substring: the chip
-   // "Lake" must not match the tag "Lake Photos". A pipe can never appear in a
-   // tag, since tags are restricted to letters, digits, space, _ and -.
-   card.dataset.tags = tagsFor(key).length
-     ? '|' + tagsFor(key).join('|').toLowerCase() + '|' : '';
+   reblob(key);
+   card.dataset.tags = TAGBLOB[key] || '';
+ }
+
+ // The searchable form of each photograph's tags, kept beside TAGS so the
+ // filter can read them for photographs whose cards are still in the template.
+ // Pipe-delimited so an exact chip match cannot hit a substring: the chip
+ // "Lake" must not match the tag "Lake Photos". A pipe can never appear in a
+ // tag, since tags are restricted to letters, digits, space, _ and -.
+ let TAGBLOB = {};
+ function reblob(key) {
+   const t = TAGS[key];
+   if (t && t.length) TAGBLOB[key] = '|' + t.join('|').toLowerCase() + '|';
+   else delete TAGBLOB[key];
+ }
+ function reblobAll() {
+   TAGBLOB = {};
+   for (const k in TAGS) reblob(k);
  }
 
  function addTagToCard(card, raw) {
@@ -2774,8 +3102,9 @@ __CARDS__
    return true;
  }
 
- for (const card of cards) {
-   renderCardTags(card);
+ // Wired when a card is moved into the grid, not at load: most of them are
+ // still in the template, and a listener on an inert node earns nothing.
+ function wireTagInput(card) {
    const input = card.querySelector('.taginput');
    // Comma and Enter both commit. Blur catches the half-typed tag people leave
    // behind when they click away, which is the most common way to lose one.
@@ -2825,7 +3154,8 @@ __CARDS__
  }
  function selectTag(name) {
    if (!selected.some(t => t.toLowerCase() === name.toLowerCase())) selected.push(name);
-   qEl.value = ''; query = '';
+   qEl.value = '';
+   clearTimeout(qTimer); qTimer = null; query = '';
    closeMenu(); renderChips(); apply();
  }
 
@@ -2903,7 +3233,8 @@ __CARDS__
    }
    if (!hit) { refreshTagUI(); return; }
    persist();
-   cards.forEach(c => renderCardTags(c));
+   reblobAll();
+   liveCards().forEach(c => renderCardTags(c));
    refreshTagUI();
    toast('Removed "' + name + '" from ' + hit + (hit === 1 ? ' photo' : ' photos'),
          'Undo', () => {
@@ -2911,7 +3242,8 @@ __CARDS__
      for (const k of Object.keys(TAGS)) delete TAGS[k];
      for (const k in restored) TAGS[k] = restored[k];
      persist();
-     cards.forEach(c => renderCardTags(c));
+     reblobAll();
+     liveCards().forEach(c => renderCardTags(c));
      refreshTagUI();
      toast('Put "' + name + '" back');
    });
@@ -2941,33 +3273,59 @@ __CARDS__
 
  let verdictFilter = 'all', showDups = false, query = '', kindFilter = 'all', folderFilter = 'all';
  const shown = document.getElementById('shown');
+ // Two passes, and the split is the point. The first runs over the arrays
+ // harvested at load and decides what matches; it touches no elements, so it
+ // costs the same whether one card has been built or four thousand. The second
+ // only walks the cards that actually exist, which on the index is none.
  function apply() {
    let n = 0;
-   for (const c of cards) {
-     const okV = verdictFilter === 'all' || c.dataset.verdict === verdictFilter;
-     const okD = showDups || c.dataset.dup === '0';
-     // Chips are ORed: a card qualifies if it carries ANY selected tag, so
-     // picking "Lake" and "Desert" shows both sets rather than only photographs
-     // that happen to be tagged with both. Each extra chip widens the results.
-     // Free text still matches folder and filename, and a tag name as well.
-     const cardTags = (c.dataset.tags || '');
-     let okT = selected.length === 0;
-     for (const t of selected) {
-       if (cardTags.includes('|' + t.toLowerCase() + '|')) { okT = true; break; }
-     }
-     const okQ = !query || c.dataset.search.includes(query) || cardTags.includes(query);
-     const okK = kindFilter === 'all' || c.dataset.kind === kindFilter;
+   const folderOpen = view === 'folders' && openGroup >= 0;
+   // Lowercased and wrapped once rather than once per photograph.
+   const chips = selected.map(t => '|' + t.toLowerCase() + '|');
+   for (let i = 0; i < N; i++) {
+     let ok = verdictFilter === 'all' || F_VERDICT[i] === verdictFilter;
+     if (ok && !showDups) ok = F_DUP[i] === '0';
+     if (ok && kindFilter !== 'all') ok = F_KIND[i] === kindFilter;
      // data-foldertop is the top-level folder, computed in Python, so selecting
      // a folder brings in its subfolders (Old Faithful, Publish) with a plain
-     // equality test. Deliberately no path-separator logic here: a lone Windows
-     // backslash inside this template would escape the quote and break the whole
-     // script block.
-     const okF = folderFilter === 'all' || c.dataset.foldertop === folderFilter;
-     const vis = okV && okD && okQ && okK && okF && okT;
-     c.classList.toggle('hidden', !vis);
-     if (vis) n++;
+     // equality test. The picker is put away on the index, where the tiles are
+     // the folders, so it never competes with an open gallery.
+     if (ok && folderFilter !== 'all' && view === 'all')
+       ok = F_TOP[i] === folderFilter;
+     const cardTags = TAGBLOB[F_KEY[i]] || '';
+     // Chips are ORed: a photograph qualifies if it carries ANY selected tag,
+     // so picking "Lake" and "Desert" shows both sets rather than only the
+     // ones tagged with both. Each extra chip widens the results.
+     if (ok && chips.length) {
+       ok = false;
+       for (const t of chips) if (cardTags.includes(t)) { ok = true; break; }
+     }
+     // Free text still matches folder and filename, and a tag name as well.
+     if (ok && query) ok = F_SEARCH[i].includes(query) || cardTags.includes(query);
+     // An open folder is the last word: whatever the filters allow, nothing
+     // from another gallery appears, and the lightbox arrows - which walk
+     // whatever is visible - therefore stop at the folder's edges.
+     if (ok && folderOpen && F_GROUP[i] !== openGroup) ok = false;
+     MATCH[i] = ok ? 1 : 0;
+     if (ok) n++;
    }
-   if (shown) shown.textContent = n + ' shown';
+   for (const c of grid.children)
+     c.classList.toggle('hidden', !MATCH[+c.dataset.idx]);
+   if (inIndex()) {
+     // n is every photograph that matched, across all the folders still
+     // standing, so the two halves of this line answer different questions.
+     const nf = refreshFolders();
+     if (shown) shown.textContent =
+       nf + (nf === 1 ? ' folder' : ' folders') + ' · ' + n + ' shown';
+   } else {
+     emptyEl.style.display = 'none';
+     if (shown) shown.textContent = n + ' shown';
+     if (folderOpen) {
+       const all = byGroup[openGroup].length;
+       crumbN.textContent = n === all
+         ? n + (n === 1 ? ' photo' : ' photos') : n + ' of ' + all;
+     }
+   }
  }
  // ---- sorting --------------------------------------------------------------
  // Cards are reordered in the DOM rather than re-rendered, so tags, hearts and
@@ -2983,7 +3341,7 @@ __CARDS__
      if (key === 'folder') return c.dataset.folder || '';
      return c.dataset.name || '';
    };
-   const ordered = cards.slice().sort((a, b) => {
+   const ordered = liveCards().sort((a, b) => {
      const va = value(a), vb = value(b);
      let r;
      if (key === 'score') r = va - vb;
@@ -3006,7 +3364,223 @@ __CARDS__
    ordered.forEach(c => frag.appendChild(c));
    grid.appendChild(frag);
  }
- document.getElementById('sort').onchange = e => { sortCards(e.target.value); apply(); };
+
+ // ==== the folder index =====================================================
+ // Two ways through the same photographs: an index of folders to pick from, or
+ // all of them on one page. Nothing is duplicated - a card is the same element
+ // in both - and switching back and forth keeps the tags, the sort order and
+ // the lightbox exactly where they were.
+ const foldersEl = document.getElementById('folders');
+ const crumbEl = document.getElementById('crumb');
+ const crumbN = document.getElementById('crumbn');
+ const emptyEl = document.getElementById('empty');
+ const sortSel = document.getElementById('sort');
+
+ // A-Z by name. Unfiled is not a folder anybody named, so it sits at the end
+ // whatever it would collate as.
+ const UNFILED = 'Unfiled';
+ const folderOrder = GROUPS.map((_, i) => i).sort((a, b) => {
+   const na = GROUPS[a], nb = GROUPS[b];
+   if ((na === UNFILED) !== (nb === UNFILED)) return na === UNFILED ? 1 : -1;
+   return collator.compare(na, nb);
+ });
+
+ // '2011' for a single year, '2010-2011' for a shoot that crossed one.
+ const yearSpan = (a, b) => {
+   const ya = a.slice(0, 4), yb = b.slice(0, 4);
+   return ya === yb ? ya : ya + '–' + yb;
+ };
+
+ const tiles = folderOrder.map(gi => {
+   // A real <button>, so it is focusable, reachable by keyboard and announced
+   // as a control without any of that having to be reimplemented.
+   const t = document.createElement('button');
+   t.type = 'button'; t.className = 'fold'; t.dataset.group = gi;
+   const mos = document.createElement('div');
+   mos.className = 'mosaic';
+   const imgs = [];
+   for (let k = 0; k < 4; k++) {
+     const im = document.createElement('img');
+     im.loading = 'lazy'; im.alt = '';
+     mos.appendChild(im); imgs.push(im);
+   }
+   const nm = document.createElement('div');
+   nm.className = 'foldname'; nm.textContent = GROUPS[gi]; nm.title = GROUPS[gi];
+   const mt = document.createElement('div');
+   mt.className = 'foldmeta';
+   const mc = document.createElement('span');
+   mt.appendChild(mc);
+   t.append(mos, nm, mt);
+   t.onclick = () => openFolder(gi);
+   foldersEl.appendChild(t);
+   return {el: t, gi, mos, imgs, meta: mc};
+ });
+
+ // The cover shows the best of whatever currently passes the filters, so a
+ // search for 'night' leaves every folder wearing its best night photograph
+ // rather than a cover that no longer represents what is inside.
+ function paintTile(t) {
+   const live = [];
+   let oldest = '', newest = '';
+   for (const i of byGroup[t.gi]) {
+     if (!MATCH[i]) continue;
+     live.push(i);
+     const d = F_DATE[i];
+     if (d) { if (!oldest || d < oldest) oldest = d; if (d > newest) newest = d; }
+   }
+   t.el.style.display = live.length ? '' : 'none';
+   if (!live.length) return;
+   live.sort((a, b) => F_SCORE[b] - F_SCORE[a]);
+   const pick = live.slice(0, 4);
+   // The class drives the layout: one photograph fills the tile, two split it,
+   // three put the best one along the top. Four is the plain 2x2.
+   t.mos.className = 'mosaic n' + pick.length;
+   t.imgs.forEach((im, k) => {
+     if (pick[k] === undefined) { im.style.display = 'none'; im.removeAttribute('src'); return; }
+     im.style.display = '';
+     // Only touched when it actually changes, so typing in the search box does
+     // not restart a download on every keystroke.
+     const want = F_THUMB[pick[k]];
+     if (im.getAttribute('src') !== want) im.setAttribute('src', want);
+   });
+   t.meta.textContent = live.length + (live.length === 1 ? ' photo' : ' photos') +
+     (newest ? ' · ' + yearSpan(oldest || newest, newest) : '');
+ }
+
+ // What a folder is worth under each ordering, read off the photographs
+ // currently passing the filters - so a search reorders the tiles by what
+ // actually survived it rather than by what used to be inside.
+ function folderKey(gi, key) {
+   let best = null;
+   for (const i of byGroup[gi]) {
+     if (!MATCH[i]) continue;
+     if (key === 'score') { if (best === null || F_SCORE[i] > best) best = F_SCORE[i]; }
+     else if (key === 'date') { const d = F_DATE[i];
+                                if (d && (best === null || d > best)) best = d; }
+   }
+   return best;
+ }
+
+ // Tiles are moved rather than rebuilt, so their mosaics keep the images they
+ // have already downloaded.
+ function sortFolders(mode) {
+   const bits = mode.split('-');
+   let key = bits[0];
+   const sign = bits[1] === 'desc' ? -1 : 1;
+   // A tile has no file name of its own, so File name orders it the only way
+   // that means anything here - by the folder's name.
+   if (key === 'name') key = 'folder';
+   const order = folderOrder.slice().sort((a, b) => {
+     const na = GROUPS[a], nb = GROUPS[b];
+     if ((na === UNFILED) !== (nb === UNFILED)) return na === UNFILED ? 1 : -1;
+     let r;
+     if (key === 'folder') r = collator.compare(na, nb);
+     else {
+       const va = folderKey(a, key), vb = folderKey(b, key);
+       // A folder with nothing showing sinks, whichever way the sort runs.
+       if (va === null && vb === null) r = 0;
+       else if (va === null) return 1;
+       else if (vb === null) return -1;
+       else if (key === 'date') r = va < vb ? -1 : va > vb ? 1 : 0;
+       else r = va - vb;
+     }
+     if (r === 0) return collator.compare(na, nb);
+     return r * sign;
+   });
+   const pos = {};
+   order.forEach((gi, i) => { pos[gi] = i; });
+   const frag = document.createDocumentFragment();
+   tiles.slice().sort((a, b) => pos[a.gi] - pos[b.gi])
+        .forEach(t => frag.appendChild(t.el));
+   foldersEl.appendChild(frag);
+ }
+
+ // Called by apply() once the filters have decided what is visible.
+ function refreshFolders() {
+   let count = 0;
+   for (const t of tiles) { paintTile(t); if (t.el.style.display !== 'none') count++; }
+   // Score and date are read off what survived the filters, so the tiles are
+   // reordered alongside being repainted.
+   sortFolders(indexSort);
+   emptyEl.style.display = count ? 'none' : 'block';
+   return count;
+ }
+
+ // Each view drops the orderings that say nothing in it.
+ //
+ // On the index: Score and File name. A folder is not a photograph - it has no
+ // score and no file name of its own, so neither is a question anybody is
+ // asking of a row of folders.
+ // Inside a folder: Folder A-Z / Z-A. Every photograph in there shares it.
+ // In All photos: none of them.
+ //
+ // Removed and reinserted rather than hidden: `hidden` on an <option> is not
+ // honoured everywhere, and a select that silently ignores it would offer an
+ // option that does nothing.
+ const allSortOpts = [...sortSel.options];
+ function syncSortOptions() {
+   const drop = inIndex() ? ['score-', 'name-']
+              : (view === 'folders' && openGroup >= 0) ? ['folder-'] : [];
+   const want = allSortOpts.filter(o => !drop.some(d => o.value.startsWith(d)));
+   // Compared by value, not by count: the index drops two options and a folder
+   // drops two different ones, so the lists are the same LENGTH in both and a
+   // length check would skip the rebuild and leave the wrong two missing.
+   const have = [...sortSel.options].map(o => o.value).join(',');
+   if (have === want.map(o => o.value).join(',')) return;
+   sortSel.textContent = '';
+   want.forEach(o => sortSel.appendChild(o));
+ }
+ const offers = v => [...sortSel.options].some(o => o.value === v);
+
+ function syncBar() {
+   syncSortOptions();
+   let wanted = inIndex() ? indexSort : photoSort;
+   // A choice the box no longer carries falls back to the order that view
+   // opens on - which differs, since the index cannot offer Score and a folder
+   // cannot offer Folder.
+   if (!offers(wanted)) {
+     if (inIndex()) { indexSort = 'folder-asc'; wanted = indexSort; }
+     else { photoSort = 'score-desc'; wanted = photoSort; sortCards(wanted); }
+   }
+   sortSel.value = wanted;
+   if (inIndex()) sortFolders(indexSort);
+   document.body.classList.toggle('view-folders', view === 'folders');
+   document.body.classList.toggle('folder-open', view === 'folders' && openGroup >= 0);
+   document.querySelectorAll('#views button').forEach(b =>
+     b.classList.toggle('on', b.dataset.view === view));
+ }
+
+ // Both entering and leaving a folder put you at the top. Landing halfway down
+ // a folder you have never seen is disorienting.
+ const toTop = () => window.scrollTo({top: 0});
+
+ function openFolder(gi) {
+   openGroup = gi;
+   crumbEl.querySelector('h2').textContent = GROUPS[gi];
+   ensureView();                 // this is where a folder's cards come in
+   syncBar(); apply(); toTop();
+ }
+ function closeFolder() { openGroup = -1; syncBar(); apply(); toTop(); }
+ function setView(v) {
+   view = v; openGroup = -1;
+   try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
+   // All photos is an explicit ask for everything at once, so it is the one
+   // view that does build the whole grid.
+   ensureView();
+   syncBar(); apply();
+ }
+ document.querySelectorAll('#views button').forEach(b => {
+   b.onclick = () => setView(b.dataset.view);
+ });
+ document.getElementById('back').onclick = closeFolder;
+
+ sortSel.onchange = e => {
+   // On the index the box orders the folder tiles; everywhere else it orders
+   // the photographs. Each view remembers its own choice.
+   if (inIndex()) { indexSort = e.target.value; sortFolders(indexSort); }
+   else { photoSort = e.target.value; sortCards(photoSort); }
+   apply();
+ };
 
  document.getElementById('kind').onchange = e => { kindFilter = e.target.value; apply(); };
  document.getElementById('folder').onchange = e => { folderFilter = e.target.value; apply(); };
@@ -3015,10 +3589,21 @@ __CARDS__
    b.classList.add('on'); verdictFilter = b.dataset.f; apply();
  });
  document.getElementById('dups').onchange = e => { showDups = e.target.checked; apply(); };
- qEl.addEventListener('input', e => {
-   query = e.target.value.toLowerCase();
-   openMenu(e.target.value);
+ // The tag menu reopens on every keystroke - it is what you are watching while
+ // you type - but the filter itself waits for a pause. Each pass reads every
+ // card, and running one per keystroke is what makes a search box on a large
+ // report feel like it is fighting back.
+ let qTimer = null;
+ function searchNow(value) {
+   clearTimeout(qTimer); qTimer = null;
+   query = (value || '').toLowerCase();
    apply();
+ }
+ qEl.addEventListener('input', e => {
+   const raw = e.target.value;
+   openMenu(raw);
+   clearTimeout(qTimer);
+   qTimer = setTimeout(() => searchNow(raw), 120);
  });
  qEl.addEventListener('focus', () => {
    searchBox.classList.add('focus');
@@ -3035,7 +3620,7 @@ __CARDS__
      if (menuIdx >= 0 && menuItems[menuIdx]) { e.preventDefault(); selectTag(menuItems[menuIdx]); }
    } else if (e.key === 'Escape') {
      if (menu.classList.contains('open')) { e.stopPropagation(); closeMenu(); }
-     else { qEl.value = ''; query = ''; apply(); }
+     else { qEl.value = ''; searchNow(''); }
    } else if (e.key === 'Backspace' && !qEl.value && selected.length) {
      selected.pop(); renderChips(); apply();
    }
@@ -3043,6 +3628,9 @@ __CARDS__
  searchBox.addEventListener('mousedown', e => {
    if (e.target === searchBox || e.target === chipBox) { e.preventDefault(); qEl.focus(); }
  });
+ reblobAll();
+ ensureView();
+ syncBar();
  apply();
 
  // ---- lightbox -------------------------------------------------------------
@@ -3211,6 +3799,124 @@ def top_folder(folder: Optional[str]) -> str:
     return re.split(r"[\\/]", folder or "(root)")[0] or "(root)"
 
 
+UNFILED_GROUP = "Unfiled"
+
+
+def folder_group(folder: Optional[str]) -> str:
+    """
+    Which gallery a photograph belongs to.
+
+    Only the top level counts, so a shoot filed as
+
+        2010-03-12 - Arches National Park
+        2010-03-12 - Arches National Park\\Publish
+
+    is one gallery rather than two. Splitting those apart would show the same
+    afternoon twice and put the keepers in a gallery of their own, away from
+    the frames they were chosen from.
+
+    The date comes off the front for the same reason it comes off a card: the
+    capture date is already on every photograph inside.
+    """
+    name = strip_folder_date(top_folder(folder)) if folder else ""
+    # top_folder answers '(root)' for a photograph sitting loose in the library.
+    # That is a fine word for a report you read yourself and a poor one for a
+    # gallery, so it gets a name anybody can make sense of.
+    return name if name and name != "(root)" else UNFILED_GROUP
+
+
+# ---------------------------------------------------------------------------
+# The folder tiles' colour scheme, worked out rather than chosen
+# ---------------------------------------------------------------------------
+
+DEFAULT_FOLDER_OUTLINE = "#b09468"
+
+# The tile keeps the page's own dark card; only its outline is manila. That
+# colour is measured against the card it sits on, because a line is the one
+# thing on a tile that has no fallback - too dark and the folder shape simply
+# is not there.
+#
+# 3:1 is the WCAG bar for a non-text interface element, which is what a border
+# is. The shipped default lands near 6:1 - deliberately the same weight as the
+# muted grey the page already uses for dates and counts, so the outline reads
+# as part of the same family rather than as a highlight.
+OUTLINE_MIN_CONTRAST = 3.0
+TILE_BG = "#1b1b1b"          # the tile's background, the same dark card in both reports
+
+
+def _hex_rgb(value: str) -> tuple[float, float, float]:
+    v = value.strip().lstrip("#")
+    if len(v) == 3:
+        v = "".join(c * 2 for c in v)
+    if len(v) != 6 or any(c not in "0123456789abcdefABCDEF" for c in v):
+        raise ValueError(f"{value!r} is not a colour like #b09468")
+    return tuple(int(v[i:i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _rgb_hex(rgb) -> str:
+    return "#" + "".join(f"{max(0, min(255, round(c * 255))):02x}" for c in rgb)
+
+
+def _relative_luminance(rgb) -> float:
+    def channel(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (channel(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b) -> float:
+    """WCAG contrast ratio between two rgb triples, 1.0 to 21.0."""
+    la, lb = _relative_luminance(a), _relative_luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def outline_ok(value: str) -> bool:
+    """Whether a --folder-outline value is a colour this can use at all."""
+    try:
+        _hex_rgb(value)
+    except ValueError:
+        return False
+    return True
+
+
+def folder_palette(outline_hex: str) -> dict:
+    """
+    Outline colour in, the tile's two line colours out.
+
+    Only the outline is yours to choose. The card behind it stays the page's
+    own, so the tiles sit in the same family as every other panel on the page
+    and the text on them keeps the colours it has everywhere else - which is
+    what makes a coloured folder shape read as a folder rather than as a
+    coloured box.
+
+    A colour too dark to see against that card is lifted until it clears the
+    3:1 floor, measured on the quantised value rather than the floating-point
+    one: rounding to eight bits per channel moves the ratio, and a line chosen
+    at exactly 3.0 can land at 2.99 once it is a hex string.
+    """
+    import colorsys
+    rgb = _hex_rgb(outline_hex)
+    card = _hex_rgb(TILE_BG)
+    hue, light, sat = colorsys.rgb_to_hls(*rgb)
+
+    line = _rgb_hex(rgb)
+    # Walk toward the light until the border is actually visible. Hue and
+    # saturation are left alone, so a lifted colour is recognisably the one
+    # that was asked for.
+    while contrast(_hex_rgb(line), card) < OUTLINE_MIN_CONTRAST and light < 0.99:
+        light = min(0.99, light + 0.01)
+        line = _rgb_hex(colorsys.hls_to_rgb(hue, light, sat))
+
+    return {
+        "line": line,
+        # Hover lifts the outline rather than the card, so the whole tile does
+        # not flash - the folder's edge catches the light and that is all.
+        "hover": _rgb_hex(colorsys.hls_to_rgb(
+            hue, min(1.0, light + 0.14), max(0.0, sat * 0.95))),
+    }
+
+
 def script_json(obj, ensure_ascii: bool = True) -> str:
     """
     JSON safe to drop inside a <script> block.
@@ -3231,9 +3937,21 @@ def script_json(obj, ensure_ascii: bool = True) -> str:
 
 
 def write_html(rows, dest: Path, root: Path, stats: dict,
-               tags: Optional[dict] = None) -> None:
+               tags: Optional[dict] = None, view: str = "folders",
+               folder_outline: str = DEFAULT_FOLDER_OUTLINE) -> None:
     tags = tags or {}
     previews_dir = dest.parent / "previews"
+    # Which gallery each photograph belongs to. The order here is the order the
+    # tiles are numbered in; the page sorts them for display.
+    groups: list[str] = []
+    group_idx: dict[str, int] = {}
+    for r in rows:
+        if r["error"]:
+            continue
+        g = folder_group(r["folder"])
+        if g not in group_idx:
+            group_idx[g] = len(groups)
+            groups.append(g)
     cards = []
     for r in rows:
         if r["error"]:
@@ -3287,13 +4005,20 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
         if not (previews_dir / thumb_name(r["path"])).exists():
             preview = ""
 
+        # Escaped like every other attribute. The URL builder percent-encodes
+        # the quote as well, so this is the second of two guards rather than
+        # the only one - a folder name arrives from a disk, and neither guard
+        # is somewhere a future edit should have to remember.
+        folder_url = html.escape(win_folder_url(real), quote=True)
         links = (f'<a href="#" data-view="1">view</a>'
-                 f'<a href="{win_folder_url(real)}">open folder</a>')
+                 f'<a href="{folder_url}">open folder</a>')
         if is_vid:
             vid_badge = ('<span class="badge VIDEO">VIDEO '
                          f'{html.escape(hhmmss(r["timestamp_s"] or 0))}</span>')
             if r["extracted_path"]:
-                links += (f'<a href="{win_folder_url(r["extracted_path"])}"'
+                still_url = html.escape(
+                    win_folder_url(r["extracted_path"]), quote=True)
+                links += (f'<a href="{still_url}"'
                           f' style="color:#8ff0bd">extracted still</a>')
         else:
             vid_badge = ""
@@ -3306,10 +4031,13 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
    data-preview="{html.escape(preview, quote=True)}"
    data-path="{html.escape(real, quote=True)}"
    data-tagkey="{html.escape(r['path'], quote=True)}"
-   data-folderurl="{win_folder_url(real)}"
+   data-folderurl="{folder_url}"
    data-name="{html.escape(r['filename'], quote=True)}"
    data-folder="{html.escape(folder_shown, quote=True)}"
    data-foldertop="{html.escape(top_folder(r['folder']), quote=True)}"
+   data-group="{group_idx[folder_group(r['folder'])]}"
+   data-samefolder="{1 if folder_shown == folder_group(r['folder']) else 0}"
+   data-thumb="{html.escape(thumb, quote=True)}"
    data-verdicttext="{html.escape(verdict, quote=True)}"
    data-res="{html.escape(res_txt, quote=True)}"
    data-score="{(r['composite'] or 0):.0f}"
@@ -3368,11 +4096,16 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
         str(dest.resolve()).encode("utf-8"),
         usedforsecurity=False).hexdigest()[:16]
 
+    pal = folder_palette(folder_outline)
     out = (HTML_TEMPLATE
            .replace("__CARDS__", "\n".join(cards))
            .replace("__STATS__", stats_html)
            .replace("__FOLDER_OPTIONS__", "\n".join(options))
            .replace("__TAGS_JSON__", script_json(payload))
+           .replace("__GROUPS_JSON__", script_json(groups))
+           .replace("__FOLDLINE__", pal["line"])
+           .replace("__FOLDLINEHOVER__", pal["hover"])
+           .replace("__VIEW__", "all" if view == "all" else "folders")
            .replace("__STORAGE_KEY__", store_key)
            .replace("__PROJECT_URL__", PROJECT_URL)
            )
@@ -3460,8 +4193,56 @@ def filter_hidden(rows, root: Path, min_edge: int = MIN_IMAGE_EDGE):
     return by_path
 
 
+def backfill_video_dates(cache: Cache) -> int:
+    """
+    Give already-scored video frames the date their clip was recorded.
+
+    Frames scored before this existed have no capture date, and re-scoring a
+    library to recover one would mean hours of GPU work for a field that costs
+    one header read. So it is filled in separately: one ffprobe per clip that
+    still has undated frames, no decoding, nothing re-scored. Returns how many
+    rows were dated.
+
+    Runs from report building rather than from scoring, so `--report-only`
+    picks it up too. Clips that genuinely recorded no date are probed once per
+    run and simply stay undated.
+    """
+    rows = [r for r in cache.all_rows()
+            if r["source_type"] == "video_frame" and r["source_video"]
+            and not r["taken_at"] and not r["error"]]
+    if not rows or not have_ffmpeg():
+        return 0
+
+    by_video: dict[str, list] = {}
+    for r in rows:
+        by_video.setdefault(r["source_video"], []).append(r)
+
+    dated = 0
+    for video, frames in by_video.items():
+        try:
+            if not Path(video).exists():
+                continue
+        except OSError:
+            continue
+        created = probe_video_created(Path(video))
+        if not created:
+            continue
+        for r in frames:
+            when = frame_taken_at(created, r["timestamp_s"] or 0.0)
+            if when:
+                cache.conn.execute(
+                    "UPDATE photos SET taken_at=? WHERE path=?", (when, r["path"]))
+                dated += 1
+    if dated:
+        cache.commit()
+        log(f"Dated {dated} video frames from {len(by_video)} clips")
+    return dated
+
+
 def build_reports(cache: Cache, out_dir: Path, root: Path,
-                  min_edge: int = MIN_IMAGE_EDGE) -> None:
+                  min_edge: int = MIN_IMAGE_EDGE, view: str = "folders",
+                  folder_outline: str = DEFAULT_FOLDER_OUTLINE) -> None:
+    backfill_video_dates(cache)
     all_rows = filter_hidden(cache.all_rows(), root, min_edge)
     tags = load_tags(out_dir)
 
@@ -3488,7 +4269,8 @@ def build_reports(cache: Cache, out_dir: Path, root: Path,
         "shortlisted": len(keepers),
         "hidden_dups": sum(1 for r in shown if r["dup_of"]),
     }
-    write_html(shown, out_dir / "report_strong_top.html", root, stats, tags)
+    write_html(shown, out_dir / "report_strong_top.html", root, stats, tags,
+               view=view, folder_outline=folder_outline)
     write_csv(shown, out_dir / "report_strong_top.csv", tags)
 
     log(f"Shortlist report: {out_dir / 'report_strong_top.html'}")
@@ -3640,6 +4422,15 @@ def main(argv=None) -> int:
     ap.add_argument("--no-previews", action="store_true",
                     help="Skip the larger JPEGs the lightbox displays (saves disk, "
                          "but clicking a photo will have nothing to show)")
+    ap.add_argument("--view", choices=("folders", "all"), default="folders",
+                    help="Which view the report opens on: an index of folders "
+                         "(default) or every photograph on one page. Whichever "
+                         "you pick in the report itself is remembered after that")
+    ap.add_argument("--folder-outline", default=DEFAULT_FOLDER_OUTLINE,
+                    metavar="HEX",
+                    help=f"Outline colour of the folder tiles, a hex value like "
+                         f"{DEFAULT_FOLDER_OUTLINE} (the default). A colour too "
+                         f"dark to see against the card is lifted until it is")
     ap.add_argument("--min-edge", type=int, default=MIN_IMAGE_EDGE, metavar="PX",
                     help=f"Ignore any image or clip whose shorter side is under PX "
                          f"pixels - icons, emoji, memes, web thumbnails and the like "
@@ -3656,6 +4447,16 @@ def main(argv=None) -> int:
     ap.add_argument("--device", help="Force torch device: cuda / cpu")
     ap.add_argument("--verbose", action="store_true", help="Print full tracebacks on error")
     args = ap.parse_args(argv)
+
+    # This value is written into the report's stylesheet, so it is checked
+    # before anything else happens rather than throwing from inside the
+    # report writer after a long scoring run. Nothing but a hex colour gets
+    # through: folder_palette rebuilds the string from parsed numbers, so a
+    # value carrying CSS of its own cannot survive the trip.
+    if not outline_ok(args.folder_outline):
+        log(f"ERROR: --folder-outline {args.folder_outline!r} is not a colour.")
+        log("       Wanted a hex value like #b09468 or #b96, and nothing else.")
+        return 2
 
     root = Path(args.root).expanduser().resolve()
     if not root.is_dir():
@@ -3691,12 +4492,14 @@ def main(argv=None) -> int:
         run_recompute(cache)
         if not args.no_extract and not args.no_video and have_ffmpeg():
             run_extraction(cache, out_dir)
-        build_reports(cache, out_dir, root, args.min_edge)
+        build_reports(cache, out_dir, root, args.min_edge,
+                      view=args.view, folder_outline=args.folder_outline)
         return 0
 
     if args.recompute:
         run_recompute(cache)
-        build_reports(cache, out_dir, root, args.min_edge)
+        build_reports(cache, out_dir, root, args.min_edge,
+                      view=args.view, folder_outline=args.folder_outline)
         return 0
 
     if not args.report_only:
@@ -3711,7 +4514,8 @@ def main(argv=None) -> int:
         if not args.no_extract and not args.no_video and have_ffmpeg():
             run_extraction(cache, out_dir)
 
-    build_reports(cache, out_dir, root, args.min_edge)
+    build_reports(cache, out_dir, root, args.min_edge,
+                  view=args.view, folder_outline=args.folder_outline)
     return 0
 
 

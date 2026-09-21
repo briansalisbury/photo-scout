@@ -14,7 +14,8 @@ from PIL import Image
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-ORIG_MD5_BEFORE = hashlib.md5((ROOT / "photo_scout.py").read_bytes()).hexdigest()
+ORIG_MD5_BEFORE = hashlib.md5((ROOT / "photo_scout.py").read_bytes(),
+                              usedforsecurity=False).hexdigest()
 
 def load(name):
     spec = importlib.util.spec_from_file_location(name, ROOT / f"{name}.py")
@@ -116,7 +117,7 @@ check("exactly three filter buttons", hs.count('<button data-f="') == 3,
 check("All is the default", '<button data-f="all" class="on">All</button>' in hs)
 check("only one button starts active", hs.count('data-f="all" class="on"') == 1)
 check("reuses the original exclusive-filter logic",
-      "verdictFilter === 'all' || c.dataset.verdict === verdictFilter" in hs)
+      "verdictFilter === 'all' || F_VERDICT[i] === verdictFilter" in hs)
 check("no leftover toggle machinery", "bandOn" not in hs and "data-band" not in hs)
 
 print("\n=== retained features ===")
@@ -150,7 +151,8 @@ check("shortlist script scores identically",
 check("it can score from scratch too, not just report", rc == 0)
 
 print("\n=== the original script is untouched ===")
-after_md5 = hashlib.md5((ROOT / "photo_scout.py").read_bytes()).hexdigest()
+after_md5 = hashlib.md5((ROOT / "photo_scout.py").read_bytes(),
+                        usedforsecurity=False).hexdigest()
 check("photo_scout.py byte-identical", after_md5 == ORIG_MD5_BEFORE, after_md5)
 check("the two scripts differ only where intended",
       (ROOT / "photo_scout.py").read_text() != (ROOT / "photo_scout_strong_top.py").read_text())

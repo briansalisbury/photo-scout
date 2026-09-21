@@ -149,14 +149,24 @@ for frag, why in [
     check(why, frag in h)
 
 check("chip filter is exact via the pipe delimiter",
-      "includes('|' + t.toLowerCase() + '|')" in h)
+      "selected.map(t => '|' + t.toLowerCase() + '|')" in h)
 check("selected tags are ORed, not ANDed",
-      "let okT = selected.length === 0;" in h and
-      "if (cardTags.includes('|' + t.toLowerCase() + '|')) { okT = true; break; }" in h)
+      "for (const t of chips) if (cardTags.includes(t)) { ok = true; break; }" in h)
 check("no leftover AND logic", "okT = false" not in h)
 check("card tag data is pipe-delimited",
-      "'|' + tagsFor(key).join('|').toLowerCase() + '|'" in h)
-check("tag filter joins the other filters", "okV && okD && okQ && okK && okF && okT" in h)
+      "TAGBLOB[key] = '|' + t.join('|').toLowerCase() + '|'" in h)
+# Tags are read from TAGBLOB, not from the card, so a photograph whose card is
+# still in the template filters on its tags exactly like one on screen.
+check("the tag blob is keyed off the payload, not the DOM",
+      "const cardTags = TAGBLOB[F_KEY[i]] || '';" in h)
+# Every filter narrows the one before it. Written as a chain of `ok &&` rather
+# than one boolean line, so a photograph that has already failed is not tested
+# against the rest - which is what keeps a pass over the whole library cheap.
+check("tag filter joins the other filters",
+      all(frag in h for frag in ("if (ok && !showDups)",
+                                 "if (ok && kindFilter !== 'all')",
+                                 "if (ok && chips.length)",
+                                 "if (ok && query)")))
 check("free text also searches tags", "cardTags.includes(query)" in h)
 check("no stray control characters in the report",
       not any(ord(c) < 9 or 13 < ord(c) < 32 for c in h))

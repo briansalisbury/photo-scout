@@ -7,7 +7,7 @@ Each clip segment has a known solid colour and a white box in a known position,
 so an extracted still can be verified two ways: the colour proves the seek
 landed in the right segment, the box gives phash real structure to work with.
 """
-import shutil, sqlite3, subprocess, sys
+import contextlib, io, re, shutil, sqlite3, subprocess, sys
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -64,12 +64,18 @@ concat_list = BUILD / "list.txt"
 concat_list.write_text("".join(f"file '{p}'\n" for p in parts))
 MULTI = TMP / "2019-07-04 - Canyon Drive" / "CLIP_0001.MP4"
 MULTI.parent.mkdir(parents=True, exist_ok=True)
-ff(["-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(MULTI)])
+# Stamped with a recording time, the way a camera does. CLIP_0002 below is
+# deliberately left unstamped, so one clip of each kind goes through the run.
+CLIP_CREATED = "2019-07-04T18:23:11.000000Z"
+CLIP_TAKEN = "2019-07-04 18:23:11"
+ff(["-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy",
+    "-metadata", f"creation_time={CLIP_CREATED}", str(MULTI)])
 
 # --- static clip: 12s of one unchanging composition -------------------------
 STATIC = TMP / "2019-07-04 - Canyon Drive" / "CLIP_0002.MP4"
 ff(["-f", "lavfi", "-i", f"color=c=0x304060:s={W}x{H}:r=25:d=12",
     "-vf", "drawbox=x=400:y=200:w=300:h=250:color=white@1:t=fill",
+    "-map_metadata", "-1",          # no recording time at all
     "-c:v", "libx264", "-pix_fmt", "yuv420p", str(STATIC)])
 
 # --- a couple of stills in the same tree, so it's genuinely one mixed pass ---
@@ -249,6 +255,74 @@ with contextlib.redirect_stdout(buf2):
 o = buf2.getvalue()
 check("--no-video hides clips from the walk", "Found 3 images and 0 videos" in o,
       [l for l in o.splitlines() if "Found" in l][0].strip())
+
+# --- when a sampled frame was actually shot ---------------------------------
+print("\n=== dates out of the clips ===")
+from datetime import datetime, timedelta                             # noqa: E402
+
+check("the recording time is read off the container",
+      ps.probe_video_created(MULTI) == CLIP_TAKEN, repr(ps.probe_video_created(MULTI)))
+check("a clip with no such tag reports none, rather than guessing",
+      ps.probe_video_created(STATIC) is None, repr(ps.probe_video_created(STATIC)))
+
+_conn = sqlite3.connect(OUTDIR / "scores.sqlite3")
+_conn.row_factory = sqlite3.Row
+frames = list(_conn.execute(
+    "SELECT filename, timestamp_s, taken_at FROM photos "
+    "WHERE source_video=? ORDER BY timestamp_s", (str(MULTI),)))
+check("every frame of the dated clip carries a date",
+      frames and all(f["taken_at"] for f in frames),
+      f"{sum(1 for f in frames if f['taken_at'])} of {len(frames)}")
+# The whole point of adding the offset: two stills out of one clip must not
+# share a timestamp, or sorting by date cannot separate them.
+check("each frame is dated by where it sits in the clip",
+      all(f["taken_at"] ==
+          (datetime.strptime(CLIP_TAKEN, "%Y-%m-%d %H:%M:%S")
+           + timedelta(seconds=f["timestamp_s"])).strftime("%Y-%m-%d %H:%M:%S")
+          for f in frames),
+      str([(round(f["timestamp_s"], 1), f["taken_at"]) for f in frames[:3]]))
+check("so no two frames of one clip share a moment",
+      len({f["taken_at"] for f in frames}) == len(frames))
+
+undated = list(_conn.execute(
+    "SELECT taken_at FROM photos WHERE source_video=?", (str(STATIC),)))
+check("an unstamped clip leaves its frames undated rather than inventing one",
+      undated and all(u["taken_at"] is None for u in undated),
+      str([u["taken_at"] for u in undated[:3]]))
+_conn.close()
+
+# Frames scored before any of this existed must gain their dates without a
+# re-scan, which is the whole reason the backfill runs from report building.
+print("\n--- backfilling a library scored before dates existed ---")
+_c = sqlite3.connect(OUTDIR / "scores.sqlite3")
+_c.execute("UPDATE photos SET taken_at=NULL WHERE source_type='video_frame'")
+_c.commit(); _c.close()
+_cache = ps.Cache(OUTDIR / "scores.sqlite3")
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf):
+    n_dated = ps.backfill_video_dates(_cache)
+check("the backfill dates the frames it can", n_dated == len(frames), str(n_dated))
+check("and says so", "Dated" in _buf.getvalue(), _buf.getvalue()[:120])
+_c = sqlite3.connect(OUTDIR / "scores.sqlite3"); _c.row_factory = sqlite3.Row
+again = list(_c.execute(
+    "SELECT timestamp_s, taken_at FROM photos WHERE source_video=? ORDER BY timestamp_s",
+    (str(MULTI),)))
+check("to exactly what a fresh scan would have written",
+      [a["taken_at"] for a in again] == [f["taken_at"] for f in frames],
+      str([a["taken_at"] for a in again[:3]]))
+_buf2 = io.StringIO()
+with contextlib.redirect_stdout(_buf2):
+    check("and a second pass finds nothing left to do",
+          ps.backfill_video_dates(_cache) == 0)
+_c.close()
+
+# A date is only useful if it reaches the page.
+print("\n--- and it reaches the reports ---")
+_rep = (OUTDIR / "report.html").read_text(encoding="utf-8")
+check("the local report prints the day",
+      "July 4, 2019" in _rep)
+check("and the time of day",
+      re.search(r"18:2[0-9]", _rep) is not None)
 
 print("\n" + ("ALL CHECKS PASSED" if ok else "SOME CHECKS FAILED"))
 sys.exit(0 if ok else 1)

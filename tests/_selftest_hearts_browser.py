@@ -130,8 +130,13 @@ MANIFEST = Path("/tmp/hb_manifest.sqlite3"); MANIFEST.unlink(missing_ok=True)
 def publish(*extra):
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
+        # --view all unless a caller says otherwise: this suite is about the
+        # heart buttons, and every check below looks for cards. The folder
+        # index has its own suite; the one interaction worth crossing over -
+        # Liked narrowing the index - is exercised at the end of this file.
+        view = [] if "--view" in extra else ["--view", "all"]
         rc = pg.main(["--site", ORIGIN, "--out", str(OUT), "--manifest", str(MANIFEST),
-                      "--dry-run", "--emit-html"] + list(extra))
+                      "--dry-run", "--emit-html"] + list(extra) + view)
     return rc, buf.getvalue()
 
 
@@ -527,6 +532,91 @@ with sync_playwright() as pw:
           f"{STATE['api_calls'] - calls_before} calls")
     check("the gallery is otherwise complete",
           P3.eval_on_selector_all(".psc-card", "e => e.length") == total)
+
+    # ---- hearts and the folder index together ------------------------------
+    # Two features that filter the same cards from different directions. Each
+    # works; the question is whether they compose.
+    print("\n=== hearts inside the folder view ===")
+    rc, _ = publish("byfolder.html", "--hearts-url", "/api/hearts",
+                    "--hearts-token", "browser-test-token", "--view", "folders")
+    F = br.new_context().new_page()
+    ferrors = []
+    F.on("pageerror", lambda e: ferrors.append(str(e)))
+    F.set_viewport_size({"width": 1400, "height": 950})
+    F.goto(f"{ORIGIN}/byfolder.html"); F.wait_for_timeout(800)
+
+    def fvis(sel):
+        return F.eval_on_selector_all(
+            sel, "els => els.filter(e => e.offsetParent !== null).length")
+
+    all_folders = fvis(".psc-fold")
+    check("the page opens on the folder index", all_folders >= 1, str(all_folders))
+    F.click(".psc-fold"); F.wait_for_timeout(300)
+    check("a folder's cards carry heart buttons", fvis(".psc-card .psc-heart") > 0)
+    F.click(".psc-card:not(.psc-hidden) .psc-heart"); F.wait_for_timeout(500)
+    check("hearting inside a folder registers",
+          F.eval_on_selector(".psc-card:not(.psc-hidden) .psc-hcount",
+                             "e => e.textContent.trim()") == "1",
+          F.eval_on_selector(".psc-card:not(.psc-hidden) .psc-hcount",
+                             "e => e.textContent"))
+    F.click(".psc-back"); F.wait_for_timeout(300)
+    # Earlier pages in this run hearted photographs of their own, and hearts are
+    # per photograph rather than per page, so how many folders hold one is a
+    # question to ask rather than a number to hard-code.
+    #
+    # Asked of the payload and the service, not of the DOM: the index builds a
+    # folder's cards only when somebody opens it, so counting cards would
+    # measure which folders have been visited rather than which hold a like.
+    def tallies():
+        return F.evaluate("""async () => {
+          const raw = JSON.parse(document.querySelector('.psc-data').textContent);
+          const r = await fetch('/api/hearts', {cache: 'no-store'});
+          const counts = (await r.json()).counts || {};
+          const out = {};
+          raw.p.forEach(function(p){
+            out[p.g] = (out[p.g] || 0) + (counts[p.id] || 0);
+          });
+          return out;
+        }""")
+
+    want = sum(1 for n in tallies().values() if n > 0)
+    F.click(".psc-likedonly"); F.wait_for_timeout(400)
+    check("Liked leaves exactly the folders holding a liked photograph",
+          fvis(".psc-fold") == want,
+          f"{fvis('.psc-fold')} tiles, expected {want} of {all_folders}")
+    F.click(".psc-likedonly"); F.wait_for_timeout(400)
+    check("and turning it off brings them all back", fvis(".psc-fold") == all_folders)
+
+    # Each tile totals the likes inside it, and says nothing at all when there
+    # are none - a row of zeroes would be noise on a gallery nobody has liked.
+    totals = tallies()
+    shown = F.evaluate("""() => {
+      const out = {};
+      document.querySelectorAll('.psc-fold').forEach(function(t){
+        out[t.dataset.group] = t.querySelector('.psc-fhearts').textContent.trim();
+      });
+      return out;
+    }""")
+    want = {g: ("❤️ " + str(int(n)) if n > 0 else "")
+            for g, n in totals.items()}
+    check("each tile totals the likes inside it", shown == want,
+          f"{shown} vs {want}")
+    check("a folder with none shows nothing rather than a zero",
+          all(v == "" for g, v in shown.items() if not totals.get(g)),
+          str(shown))
+
+    # The count has to follow a click, not just the page load.
+    liked_group = next(g for g, n in totals.items() if n > 0)
+    before = shown[liked_group]
+    F.click(f'.psc-fold[data-group="{liked_group}"]'); F.wait_for_timeout(300)
+    F.click(".psc-card:not(.psc-hidden) .psc-heart"); F.wait_for_timeout(600)
+    F.click(".psc-back"); F.wait_for_timeout(400)
+    after = F.eval_on_selector(f'.psc-fold[data-group="{liked_group}"] .psc-fhearts',
+                               "e => e.textContent.trim()")
+    check("and it follows a like rather than only the page load",
+          after != before, f"{before!r} -> {after!r}")
+
+    check("no page errors in the folder view", not ferrors, "; ".join(ferrors[:2]))
     br.close()
 
 httpd.shutdown()

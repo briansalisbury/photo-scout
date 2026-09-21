@@ -31,7 +31,8 @@ REPORT_VERDICTS = ("TOP PICK", "STRONG")
 
 # Verdict bands applied to the final composite score.''')
 
-rep('''    write_html(rows, out_dir / "report.html", root, stats, tags)
+rep('''    write_html(rows, out_dir / "report.html", root, stats, tags,
+               view=view, folder_outline=folder_outline)
     write_csv(rows, out_dir / "report.csv", tags)
 
     shortlist = [r for r in rows if r["verdict"] in ("TOP PICK", "STRONG") and not r["dup_of"]]
@@ -39,12 +40,13 @@ rep('''    write_html(rows, out_dir / "report.html", root, stats, tags)
 
     log(f"Report:    {out_dir / 'report.html'}")
     log(f"  NB the report is library-wide: it covers all {stats['folders']} folders "
-        f"scored so far, not only the one just processed. Use the folder dropdown "
-        f"in the report to narrow it.")
+        f"scored so far, not only the one just processed. It opens on an index "
+        f"of your folders; pick one to narrow it.")
     log(f"CSV:       {out_dir / 'report.csv'}")
     log(f"Shortlist: {out_dir / 'shortlist.csv'}  ({len(shortlist)} images)")
     log(f"Stats: {stats}")''',
-'''    write_html(shown, out_dir / "report_strong_top.html", root, stats, tags)
+'''    write_html(shown, out_dir / "report_strong_top.html", root, stats, tags,
+               view=view, folder_outline=folder_outline)
     write_csv(shown, out_dir / "report_strong_top.csv", tags)
 
     log(f"Shortlist report: {out_dir / 'report_strong_top.html'}")
@@ -61,11 +63,15 @@ rep('''    write_html(rows, out_dir / "report.html", root, stats, tags)
     log("  (photo_scout.py's report.html / report.csv / shortlist.csv are untouched)")''')
 
 rep('''def build_reports(cache: Cache, out_dir: Path, root: Path,
-                  min_edge: int = MIN_IMAGE_EDGE) -> None:
+                  min_edge: int = MIN_IMAGE_EDGE, view: str = "folders",
+                  folder_outline: str = DEFAULT_FOLDER_OUTLINE) -> None:
+    backfill_video_dates(cache)
     rows = filter_hidden(cache.all_rows(), root, min_edge)
     tags = load_tags(out_dir)''',
 '''def build_reports(cache: Cache, out_dir: Path, root: Path,
-                  min_edge: int = MIN_IMAGE_EDGE) -> None:
+                  min_edge: int = MIN_IMAGE_EDGE, view: str = "folders",
+                  folder_outline: str = DEFAULT_FOLDER_OUTLINE) -> None:
+    backfill_video_dates(cache)
     all_rows = filter_hidden(cache.all_rows(), root, min_edge)
     tags = load_tags(out_dir)
 

@@ -2,7 +2,7 @@
 
 Contributions are welcome: patches, documentation, and bug reports alike.
 
-Field reports are particularly valuable. Photo Scout is exercised by fifteen test
+Field reports are particularly valuable. Photo Scout is exercised by sixteen test
 suites, but a test library is a model of a real one, and models have edges. RAW
 files from a camera the project has not met, a folder structure nobody anticipated,
 an archive an order of magnitude larger than the ones it was built against — those
@@ -93,6 +93,7 @@ for t in tests/_selftest*.py; do python "$t" >/dev/null 2>&1 \
 | `_selftest_ghost.py` | The Ghost publisher against a mock Admin API |
 | `_selftest_hearts.py` | The heart service: API, abuse handling, persistence |
 | `_selftest_hearts_browser.py` | Heart buttons in a browser, including with the service down |
+| `_selftest_folders.py` | Folder grouping, the index and its mosaics, and navigating in a browser |
 | `_selftest_security.py` | Script-block escaping, the plaintext-HTTP refusal, heart service limits |
 
 The browser suites are the slowest. They are also the ones that have caught the most.
