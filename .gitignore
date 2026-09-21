@@ -4,14 +4,10 @@
 # program can rebuild. That keeps the history small and readable.
 
 # ---- the virtual environment -------------------------------------------
-# Roughly a gigabyte of installed packages, rewritten every time pip runs.
-# requirements.txt is what actually records the dependencies, and that IS
-# tracked, so this is all rebuildable.
-Scripts/
-Lib/
-Include/
-share/
-pyvenv.cfg
+# The README creates it as .venv; venv/ is the other common name. Either way
+# requirements.txt is what records the dependencies, and that IS tracked.
+.venv/
+venv/
 __pycache__/
 *.pyc
 
@@ -37,43 +33,13 @@ _photo_scout/*
 # every commit.
 *.sqlite3
 
-# ---- odds and ends ------------------------------------------------------
-# Historical patch scripts from development. Not part of the build.
-_patch_*.py
-
-# Stray test suites left in the repository root by an older layout. The suites
-# themselves live in tests/ and ARE tracked; the leading slash anchors this to
-# the root so it cannot match tests/_selftest_*.py.
-/_selftest*.py
-
-# HANDOFF.md is a working note for a specific machine and person, not part of
-# the project. Kept local.
-HANDOFF.md
-
-# The PowerShell helpers: one-time git setup and a save-and-push wrapper.
-# Local conveniences, kept out of the history by request. NOTE: neither is
-# restored by a fresh clone, so keep a copy if you rebuild this folder from
-# GitHub.
-git-setup.ps1
-save.ps1
-
-# Credentials, and the helper that asks for them.
-#
-# keys.secret.xml is the one that MUST never be committed. It holds the Ghost
-# Admin API key and the heart admin token, encrypted with Windows DPAPI under
-# one account on one machine - useless to anybody else, but still a credential
-# store and still nobody's business but yours. The whole *.secret.* pattern is
-# ignored so a second one cannot be created with a name this list has not
-# anticipated.
-#
-# set-keys.ps1 contains no secrets at all - it only prompts - so it would be
-# safe to track. It is ignored because it is a local convenience like the two
-# above, and like them it is NOT restored by a fresh clone.
-set-keys.ps1
-keys.secret.xml
-*.secret.*
-
+# ---- downloads from a published gallery ---------------------------------
+# "Save tags" on the Ghost page downloads this. It is one visitor's tagging,
+# fed back in with --web-tags, not part of the project.
 psc-web-tags.json
+
+# ---- operating system clutter -------------------------------------------
 *.tmp
 Thumbs.db
 desktop.ini
+.DS_Store
