@@ -100,12 +100,21 @@ jobs:
 
       - name: Run the suites
         # They execute at import rather than defining test functions, so they
-        # are run directly. A non-zero exit from any one fails the job.
+        # are run directly. Every suite runs even after one fails, so a single
+        # run reports everything that is wrong rather than only the first
+        # thing; each suite's output folds into its own section of the log,
+        # and the names of any that failed appear on the run's summary page.
         run: |
+          failed=""
           for t in tests/_selftest*.py; do
-            echo "--- $t"
-            python "$t" || exit 1
+            echo "::group::$t"
+            python "$t" || failed="$failed $t"
+            echo "::endgroup::"
           done
+          if [ -n "$failed" ]; then
+            echo "::error::Suites that failed:$failed"
+            exit 1
+          fi
 
       - name: The generated variant must match its generator
         # photo_scout_strong_top.py is derived from photo_scout.py. A hand-edit

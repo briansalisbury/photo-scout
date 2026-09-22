@@ -1995,6 +1995,11 @@ def iter_media(root: Path, only_folder: Optional[str], include_video: bool = Tru
         dirnames[:] = [d for d in dirnames
                        if d.lower() not in SKIP_DIR_NAMES
                        and d.strip().lower() != HIDE_DIR_NAME]
+        # Folders in a fixed order, as files already are. os.walk hands them
+        # over in whatever order the filesystem stores them, which differs
+        # between machines, so without this a run's progress - and anything
+        # that depends on which photograph is met first - varied by disk.
+        dirnames.sort()
         for name in sorted(filenames):
             if Path(name).suffix.lower() in wanted:
                 yield Path(dirpath) / name

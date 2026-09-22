@@ -6,7 +6,7 @@ Photo Scout is an AI-powered photo **and video** analysis system that runs
 entirely on your own machine.
 
 Photo Scout creates a photo gallery of your highest-rated stills, based on 
-technical quality, aesthetics, and configurable subject matter preferences
+*technical quality, aesthetics, and configurable subject matter* preferences
 (for example: desert or night sky). It's intended as a quality and subject
 assessment and scoring application for a large photo or video library to 
 quickly narrow down top-rated stills. 
@@ -21,7 +21,8 @@ deployable "Heart" service to view and track visitor's most liked photos.
 
 I hope you discover beautiful new things to look at.
 
-- Brian Salisbury - Author, "AI Supervisor"
+  Brian Salisbury
+  Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
 [License](#14-license).

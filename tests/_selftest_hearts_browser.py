@@ -553,12 +553,19 @@ with sync_playwright() as pw:
     check("the page opens on the folder index", all_folders >= 1, str(all_folders))
     F.click(".psc-fold"); F.wait_for_timeout(300)
     check("a folder's cards carry heart buttons", fvis(".psc-card .psc-heart") > 0)
+    # Measured against what was there before, not against zero. Earlier pages
+    # in this run have hearted photographs of their own, and which photograph
+    # opens this folder depends on the order the operating system lists the
+    # fixture's files in - so it may already carry hearts on one machine and
+    # none on another.
+    def first_count():
+        t = F.eval_on_selector(".psc-card:not(.psc-hidden) .psc-hcount",
+                               "e => e.textContent.trim()")
+        return int(t) if t.isdigit() else 0
+    was = first_count()
     F.click(".psc-card:not(.psc-hidden) .psc-heart"); F.wait_for_timeout(500)
-    check("hearting inside a folder registers",
-          F.eval_on_selector(".psc-card:not(.psc-hidden) .psc-hcount",
-                             "e => e.textContent.trim()") == "1",
-          F.eval_on_selector(".psc-card:not(.psc-hidden) .psc-hcount",
-                             "e => e.textContent"))
+    check("hearting inside a folder registers", first_count() == was + 1,
+          f"{was} -> {first_count()}")
     F.click(".psc-back"); F.wait_for_timeout(300)
     # Earlier pages in this run hearted photographs of their own, and hearts are
     # per photograph rather than per page, so how many folders hold one is a
