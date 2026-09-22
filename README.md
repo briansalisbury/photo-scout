@@ -2,11 +2,11 @@
 
 ![The Photo Scout report: a shortlist of top picks and strong photographs, each card showing its rating, score, folder, capture date and resolution, and the reasons behind its score](docs/images/photo-scout-report.png)
 
-Photo Scout is an AI-powered photo **and video** analysis system that runs 
+Photo Scout is an AI-powered photo **and video** analysis system that processes 
 entirely on your own machine.
 
 Photo Scout creates a photo gallery of your highest-rated stills, based on 
-technical quality, aesthetics, and configurable subject matter preferences
+*technical quality, aesthetics, and configurable subject matter* preferences
 (for example: desert or night sky). It's intended as a quality and subject
 assessment and scoring application for a large photo or video library to 
 quickly narrow down top-rated stills. 
@@ -19,9 +19,8 @@ The report can also be uploaded as a photo gallery to any [Ghost CMS](https://gh
 implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
-I hope you discover beautiful new things to look at.
-
-- Brian Salisbury - Author, "AI Supervisor"
+- Brian Salisbury
+  Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
 [License](#14-license).
@@ -97,7 +96,7 @@ There is no model that knows which of your photographs is the good one. What exi
 are models that measure *components* of that judgment, and the script combines three
 of them.
 
-### Axis 1 — Aesthetic (weight 60%)
+### Axis 1 — Aesthetic (default weight 60%)
 
 **LAION-Aesthetic V2.** A small neural network trained on hundreds of thousands of
 human ratings of "how beautiful is this image." It sits on top of CLIP: CLIP turns
@@ -106,7 +105,7 @@ head maps that summary to a score of roughly 1–10.
 
 This is the closest thing to a proxy for "would someone hang this on a wall."
 
-### Axis 2 — Technical (weight 25%)
+### Axis 2 — Technical (default weight 25%)
 
 **NIMA** (Neural Image Assessment, from Google Research), which was trained to
 predict technical photographic quality — exposure, noise, tonal handling —
@@ -120,7 +119,7 @@ Plus two cheap arithmetic checks that catch things NIMA is soft on:
 - **Clipping**: what fraction of pixels are pure white or pure black. Blown
   highlights are the single most common reason a landscape can't be printed large.
 
-### Axis 3 — Subject match (weight 15%)
+### Axis 3 — Subject match (default weight 15%)
 
 This is the part you tune to *your own subject matter*, and it's why the script does
 something beyond generic aesthetic scoring.
