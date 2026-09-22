@@ -2,7 +2,7 @@
 
 ![The Photo Scout report: a shortlist of top picks and strong photographs, each card showing its rating, score, folder, capture date and resolution, and the reasons behind its score](docs/images/photo-scout-report.png)
 
-Photo Scout is an AI-powered photo **and video** analysis system that runs 
+Photo Scout is an AI-powered photo **and video** analysis system that processes 
 entirely on your own machine.
 
 Photo Scout creates a photo gallery of your highest-rated stills, based on 
@@ -19,9 +19,7 @@ The report can also be uploaded as a photo gallery to any [Ghost CMS](https://gh
 implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
-I hope you discover beautiful new things to look at.
-
-  Brian Salisbury
+- Brian Salisbury
   Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
