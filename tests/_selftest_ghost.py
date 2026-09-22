@@ -97,9 +97,8 @@ class MockGhost(BaseHTTPRequestHandler):
                     "type": "ValidationError"}]})
             body = json.loads(raw)["pages"][0]
             slug = body["slug"]
-            page = {"id": "pg_" + slug, "slug": slug, "title": body["title"],
-                    "lexical": body["lexical"], "status": body["status"],
-                    "updated_at": "2026-08-17T00:00:00.000Z"}
+            page = dict(body, id="pg_" + slug,
+                         updated_at="2026-08-17T00:00:00.000Z")
             STATE["pages"][slug] = page
             return self._json(201, {"pages": [page]})
         self._json(404, {"error": "no route"})
@@ -115,8 +114,7 @@ class MockGhost(BaseHTTPRequestHandler):
         page = STATE["pages"][slug]
         if body.get("updated_at") != page["updated_at"]:
             return self._json(409, {"error": "stale updated_at"})
-        page.update({"title": body["title"], "lexical": body["lexical"],
-                     "status": body["status"], "updated_at": "2026-08-17T00:00:01.000Z"})
+        page.update(dict(body, updated_at="2026-08-17T00:00:01.000Z"))
         self._json(200, {"pages": [page]})
 
     def do_GET(self):
@@ -459,6 +457,20 @@ check("nor in an emitted local preview",
       STANDIN not in (OUT / "untitled.html").read_text(encoding="utf-8")
       if (OUT / "untitled.html").exists() else True)
 
+# A gallery is mostly buttons and file names, so left to itself Ghost writes a
+# description out of the toolbar. These say what the page is instead.
+check("the page carries a description for a shared link",
+      page.get("meta_description") == pg.DEFAULT_DESCRIPTION,
+      page.get("meta_description"))
+check("and the same one for Open Graph and X",
+      page.get("og_description") == page.get("twitter_description")
+      == pg.DEFAULT_DESCRIPTION)
+check("titled the way the page is titled",
+      page.get("meta_title") == page.get("og_title") == page.get("twitter_title")
+      == STANDIN, str(page.get("og_title")))
+check("and the description is not the page's own buttons",
+      "Top picks" not in (page.get("meta_description") or ""))
+
 print("\n--- end to end, with a --title")
 rc, log = run("--key", ADMIN_KEY, "--slug", "titled-gallery", "--title", "Best of 2011")
 page = STATE["pages"]["titled-gallery"]
@@ -467,6 +479,19 @@ check("the heading band is trimmed, not hidden",
       in_lexical(pg.TITLE_SIZE_CSS["compact"], page["lexical"])
       and not in_lexical(pg.TITLE_SIZE_CSS["hide"], page["lexical"]))
 check("and nothing is said about a missing title", "heading is hidden" not in log)
+check("a real title is what the social fields carry too",
+      page.get("og_title") == page.get("meta_title") == "Best of 2011",
+      str(page.get("og_title")))
+
+print("\n--- a blank --description leaves Ghost's own alone")
+# Somebody who has written their own in Ghost admin should not have it
+# overwritten on every republish.
+rc, log = run("--key", ADMIN_KEY, "--slug", "own-words", "--description", "")
+page = STATE["pages"]["own-words"]
+check("publish succeeds", rc == 0, f"rc={rc}")
+check("and no description field is sent at all",
+      not any(k.endswith("_description") or k.endswith("_title") for k in page),
+      str([k for k in page if k.endswith(("_description", "_title"))]))
 
 print("\n=== error handling ===")
 rc, log = run("--key", "garbage-no-colon")

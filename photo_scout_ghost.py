@@ -129,6 +129,14 @@ DEFAULT_TITLE = ""
 # hidden - but the admin list needs a name, and an empty one is not reliably
 # accepted by the API.
 UNTITLED_GHOST_TITLE = "Photo Scout Gallery"
+
+# What a link to the gallery itself says underneath its title, in a chat app, a
+# search result or a social card. Ghost would otherwise scrape one out of the
+# page, which for a gallery is a run of button labels. Deliberately generic:
+# this is a community project and the page could be anybody's collection.
+# --description overrides it; --description "" leaves whatever Ghost has.
+DEFAULT_DESCRIPTION = ("Browse this collection by folder, search it by name, date "
+                       "or tag, and open any photograph full size.")
 UPLOAD_PREFIX = "psc"               # marks our uploads in Ghost's media library
 
 # Only these verdicts are published.
@@ -285,6 +293,30 @@ def _edge_block_hint(code: int, body: str, admin_url: str) -> str:
     return ""
 
 
+def social_fields(title: str, description: str) -> dict:
+    """
+    What a link to the gallery page itself says when it is shared.
+
+    Ghost derives these from the page when they are not set, which for a
+    gallery means a title of the right sort and a description made of button
+    labels. Set together so the three vocabularies - search results, Open
+    Graph, X - cannot drift apart. A blank description leaves every field
+    alone, for anyone who would rather write their own in Ghost admin.
+
+    A link to a folder or a photograph is a different matter: those are
+    answered per-link by the optional Worker in worker/, which cannot be done
+    from here because the address of the thing being shared never reaches
+    Ghost.
+    """
+    if not description:
+        return {}
+    return {
+        "meta_title": title, "meta_description": description,
+        "og_title": title, "og_description": description,
+        "twitter_title": title, "twitter_description": description,
+    }
+
+
 class GhostClient:
     """
     Talks to the Ghost Admin API.
@@ -386,10 +418,11 @@ class GhostClient:
         pages = out.get("pages") or []
         return pages[0] if pages else None
 
-    def create_page(self, slug: str, title: str, lexical: str, status: str) -> dict:
-        body = json.dumps({"pages": [{
+    def create_page(self, slug: str, title: str, lexical: str, status: str,
+                    description: str = "") -> dict:
+        body = json.dumps({"pages": [dict({
             "slug": slug, "title": title, "lexical": lexical, "status": status,
-        }]}).encode("utf-8")
+        }, **social_fields(title, description))]}).encode("utf-8")
         # No ?source= parameter. Lexical is Ghost's native storage format, so it
         # is sent as-is; `source` exists only to request conversion FROM html,
         # and passing source=lexical is rejected with a 422 AllowedValues error.
@@ -397,13 +430,14 @@ class GhostClient:
                             content_type="application/json")
         return out["pages"][0]
 
-    def update_page(self, page: dict, title: str, lexical: str, status: str) -> dict:
+    def update_page(self, page: dict, title: str, lexical: str, status: str,
+                    description: str = "") -> dict:
         # updated_at is Ghost's optimistic-concurrency check; without it the
         # edit is rejected.
-        body = json.dumps({"pages": [{
+        body = json.dumps({"pages": [dict({
             "id": page["id"], "updated_at": page["updated_at"],
             "slug": page["slug"], "title": title, "lexical": lexical, "status": status,
-        }]}).encode("utf-8")
+        }, **social_fields(title, description))]}).encode("utf-8")
         out = self._request("PUT", f"/pages/{page['id']}/", data=body,
                             content_type="application/json")
         return out["pages"][0]
@@ -677,7 +711,7 @@ GALLERY_CSS = """
 .psc-zoom button{min-width:34px;padding:6px 9px;font-size:15px;line-height:1;
   font-variant-numeric:tabular-nums}
 .psc-zoom button[disabled]{opacity:.35;cursor:default}
-.psc-foot{color:#777;font-size:12px;text-align:center;padding:18px 0 4px}
+.psc-foot{color:#858585;font-size:12px;text-align:center;padding:18px 0 4px}
 .psc-foot a{color:#9a9a9a;text-decoration:none;border-bottom:1px solid #3a3a3a}
 .psc-foot a:hover{color:var(--psc-fg);border-bottom-color:#6a6a6a}
 __HEADCSS__
@@ -686,7 +720,21 @@ __HEADCSS__
 .psc-grid{display:grid;gap:14px;
   grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--psc-colw)),1fr))}
 .psc-card{background:var(--psc-card);border:1px solid var(--psc-line);border-radius:10px;overflow:hidden}
+/* The thumbnail is a button, not a bare image: opening a photograph has to be
+   possible from the keyboard, and a click handler on an <img> is not. It is
+   stripped back to nothing so the card looks exactly as it did. */
+.psc-shot{display:block;width:100%;padding:0;border:0;background:none;
+  cursor:zoom-in;font:inherit;color:inherit}
 .psc-card img{width:100%;aspect-ratio:3/2;object-fit:cover;background:#000;display:block;cursor:zoom-in}
+/* Where the keyboard is, on a dark page and on top of a photograph alike: a
+   light ring with a dark halo outside it, so it is visible against both.
+   :focus-visible, so clicking does not leave a ring behind. */
+.psc-wrap :focus-visible,.psc-lb :focus-visible{
+  outline:2px solid #f2f6fb;outline-offset:2px;
+  box-shadow:0 0 0 4px rgba(0,0,0,.7)}
+/* The toolbar is pinned, so a card tabbed to near the top of the window would
+   be scrolled under it. This keeps the focused thing in view (WCAG 2.4.11). */
+.psc-card,.psc-fold{scroll-margin-top:110px}
 .psc-body{padding:9px 11px 11px}
 .psc-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .psc-badge{font-size:10px;letter-spacing:.06em;padding:2px 7px;border-radius:99px;font-weight:700}
@@ -701,7 +749,7 @@ __HEADCSS__
    folder name was found pushing the date and resolution out of sight. */
 .psc-meta{color:var(--psc-mut);font-size:11.5px;margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.psc-specs{color:#6f6f6f;font-size:11px;margin-top:2px;line-height:1.45;
+.psc-specs{color:#858585;font-size:11px;margin-top:2px;line-height:1.45;
   font-variant-numeric:tabular-nums}
 /* Each fact is atomic: a break may fall between the date and the time, or
    between the dimensions and the megapixel figure, but never through the middle
@@ -719,8 +767,8 @@ __HEADCSS__
 .psc-tagwrap{margin-top:8px;padding-top:8px;border-top:1px solid #2a2a2a}
 .psc-taginput{flex:1;min-width:96px;background:#141414;border:1px dashed #3a3a3a;
   color:var(--psc-fg);border-radius:6px;padding:4px 7px;font-size:11.5px;
-  font-family:inherit}
-.psc-taginput:focus{outline:none;border-color:#5a5a5a;border-style:solid}
+  font-family:inherit;min-height:24px}
+.psc-taginput:focus{border-color:#5a5a5a;border-style:solid}
 /* The search box grows to hold chips, so it is a container rather than a bare
    input, and it anchors the dropdown. */
 .psc-searchwrap{position:relative;flex:1;min-width:220px;display:flex;
@@ -728,8 +776,8 @@ __HEADCSS__
   border:1px solid #3a3a3a;border-radius:6px;padding:4px 7px}
 .psc-searchwrap.focus{border-color:#5a7f9a}
 .psc-bar .psc-q{flex:1;min-width:110px;background:transparent;border:none;
-  padding:2px;font-size:13px;color:var(--psc-fg)}
-.psc-bar .psc-q:focus{outline:none}
+  padding:2px;font-size:13px;color:var(--psc-fg);min-height:24px}
+
 .psc-tagmenu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;
   background:#1d1d1d;border:1px solid #3a3a3a;border-radius:8px;
   max-height:260px;overflow:auto;display:none;
@@ -803,11 +851,13 @@ __HEADCSS__
   white-space:nowrap;font-variant-numeric:tabular-nums}
 .psc-dims-lb:empty{display:none}
 /* Bottom right, clear of the heart on the left and the count in the middle,
-   and dressed like both of them. */
-.psc-link-lb{position:absolute;bottom:14px;right:20px;z-index:2;color:#ddd;
-  background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);
+   and shaped like both of them - but in the same blue as the gallery's own
+   link button, since it does the same job. Kept part translucent so it does
+   not sit on the photograph as a solid block. */
+.psc-link-lb{position:absolute;bottom:14px;right:20px;z-index:2;color:#dce9fb;
+  background:rgba(28,53,89,.62);border:1px solid rgba(106,166,232,.75);
   border-radius:99px;padding:5px 14px;font-size:12.5px;cursor:pointer}
-.psc-link-lb:hover{background:rgba(0,0,0,.75)}
+.psc-link-lb:hover{background:rgba(28,53,89,.92);border-color:#8fbef2}
 .psc-hearts-lb{position:absolute;bottom:14px;left:20px;z-index:2;margin:0;
   background:rgba(0,0,0,.45);padding:5px 14px;border-radius:99px}
 .psc-hearts-lb .psc-heart{font-size:20px}
@@ -944,18 +994,24 @@ __HEADCSS__
    label, because there the folder still says something. */
 .psc-view-folders.psc-open .psc-card[data-samefolder="1"] .psc-meta{display:none}
 /* The header that replaces the index once a folder is open. */
-.psc-crumb{display:none;align-items:center;gap:10px;margin:0 0 12px}
+.psc-crumb{display:none;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 12px}
 .psc-view-folders.psc-open .psc-crumb{display:flex}
 .psc-crumb h3{margin:0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
-.psc-crumb .psc-back{background:#242424;color:var(--psc-fg);border:1px solid #3a3a3a;
+/* The way back belongs to the folders view, so it wears the same tan as the
+   view button that is switched on - the two are the same idea in two places. */
+.psc-crumb .psc-back{background:#54452a;color:#f5e9d0;border:1px solid #b09468;
   border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer;flex:none}
-.psc-crumb .psc-back:hover{border-color:#5a5a5a}
+.psc-crumb .psc-back:hover{background:#6a5636;border-color:#cbb187}
 .psc-crumbn{color:var(--psc-mut);font-size:12.5px;margin-left:auto;flex:none}
-/* Copy link: the same quiet button as the way back, so the header reads as
-   one row of controls rather than a call to action. */
-.psc-crumb .psc-link{background:#242424;color:var(--psc-fg);border:1px solid #3a3a3a;
+/* Copy link is the one control here that does something for somebody else, so
+   it carries its own accent rather than the gray of the way back. Blue is the
+   complement of the folders' tan and is the furthest the page can get from the
+   bands' green and the hearts' crimson at the same time, so none of the four
+   reads as another; a state on this page is tan, green or crimson, and this is
+   the only one that means "do something". */
+.psc-crumb .psc-link{background:#1c3559;color:#dce9fb;border:1px solid #6aa6e8;
   border-radius:6px;padding:6px 11px;font-size:13px;cursor:pointer;flex:none}
-.psc-crumb .psc-link:hover{border-color:#5a5a5a}
+.psc-crumb .psc-link:hover{background:#254473;border-color:#8fbef2}
 /* Shown instead of the tiles when a search matches nothing anywhere. */
 .psc-empty{display:none;color:var(--psc-mut);padding:26px 2px;text-align:center}
 
@@ -1100,9 +1156,16 @@ GALLERY_JS = r"""
 
     if (p.th) {
       var im = document.createElement('img');
-      im.loading = 'lazy'; im.src = p.th; im.alt = p.n || '';
-      im.addEventListener('click', function(){ navPhoto(i); });
-      c.appendChild(im);
+      im.loading = 'lazy'; im.src = p.th; im.alt = '';
+      // A button, so the keyboard can open a photograph too. The image itself
+      // is decorative here: the button is named for it, and the file name is
+      // printed underneath either way.
+      var shot = document.createElement('button');
+      shot.type = 'button'; shot.className = 'psc-shot';
+      shot.setAttribute('aria-label', 'Open ' + (p.n || 'photograph'));
+      shot.appendChild(im);
+      shot.addEventListener('click', function(){ navPhoto(i); });
+      c.appendChild(shot);
     }
     var b = document.createElement('div'); b.className = 'psc-body';
     var top = document.createElement('div'); top.className = 'psc-top';
@@ -1156,6 +1219,9 @@ GALLERY_JS = r"""
     ti.className = 'psc-taginput'; ti.type = 'text';
     ti.autocomplete = 'off'; ti.spellcheck = false;
     ti.placeholder = 'add tag, comma or Enter';
+    // A placeholder is not a name: it disappears as soon as anything is
+    // typed, and is not reliably read out in the first place.
+    ti.setAttribute('aria-label', 'Add a tag to ' + (p.n || 'this photograph'));
     tw.appendChild(ti);
     b.appendChild(tw);
 
@@ -1168,6 +1234,8 @@ GALLERY_JS = r"""
       hb.className = 'psc-heart'; hb.type = 'button';
       hb.dataset.photoId = p.id; hb.textContent = '\u2764\ufe0f';
       hb.title = 'Like this photograph';
+      // Without this the button is announced as the emoji's own name.
+      hb.setAttribute('aria-label', 'Like ' + (p.n || 'this photograph'));
       hb.setAttribute('aria-pressed', 'false');
       var hc = document.createElement('span');
       hc.className = 'psc-hcount';
@@ -1921,6 +1989,12 @@ GALLERY_JS = r"""
     root.querySelectorAll('.psc-views button').forEach(function(b){
       b.classList.toggle('on', b.dataset.view === view);
     });
+    // The 'on' class is what a sighted visitor sees; aria-pressed is the same
+    // fact for everybody else.
+    root.querySelectorAll('.psc-views button,.psc-bar button[data-band],'
+                          + '.psc-likedonly').forEach(function(b){
+      b.setAttribute('aria-pressed', b.classList.contains('on') ? 'true' : 'false');
+    });
   }
 
   // Both entering and leaving a folder put you at the top of the gallery.
@@ -1936,11 +2010,27 @@ GALLERY_JS = r"""
     // This is where a folder's photographs come into the page.
     ensureView();
     syncBar(); apply(); toTop();
+    // The tile that was activated has just been hidden, which would drop the
+    // keyboard back to the top of the document. The way out of the folder is
+    // where someone arriving here needs to be.
+    focusSoon(crumb.querySelector('.psc-back'));
   }
 
   function closeFolder(){
+    var was = openGroup;
     openGroup = -1;
     syncBar(); apply(); toTop();
+    // Back to the tile just left, not to the top of the index.
+    focusSoon(root.querySelector('.psc-fold[data-group="' + was + '"]'));
+  }
+
+  // Focus after the browser has finished laying the new state out; setting it
+  // on an element that is still display:none does nothing at all.
+  function focusSoon(el){
+    if (!el) return;
+    requestAnimationFrame(function(){
+      if (el.isConnected && el.offsetParent !== null) el.focus();
+    });
   }
 
   function setView(v){
@@ -2282,13 +2372,16 @@ GALLERY_JS = r"""
       wasScale = vv.scale;
     });
   })();
+  var lbReturn = null;                 // where the keyboard came from
   function openLb(i){
     order = visibleIdx();
     cur = order.indexOf(i);
     if (cur < 0) { order = [i]; cur = 0; }   // opened something already filtered out
+    lbReturn = document.activeElement;
     lb.classList.add('open');
     show();
     setScrollLock(true);
+    focusSoon(lb.querySelector('.x'));
   }
   function closeLb(){
     // Leave the page on the photograph being looked at, not the one that was
@@ -2300,7 +2393,25 @@ GALLERY_JS = r"""
     setScrollLock(false);
     if (card && !card.classList.contains('psc-hidden'))
       card.scrollIntoView({block: 'center'});
+    // Back where it came from, or to this photograph's own card when the
+    // overlay was opened from a link and there is nowhere to go back to.
+    var back = (lbReturn && lbReturn.isConnected && lbReturn.offsetParent !== null)
+      ? lbReturn : (card && card.querySelector('.psc-shot'));
+    lbReturn = null;
+    focusSoon(back);
   }
+
+  // Tab stays inside the overlay while it is open. Without this the keyboard
+  // walks off into the page behind, which is still there and still scrolled.
+  lb.addEventListener('keydown', function(e){
+    if (e.key !== 'Tab' || !lb.classList.contains('open')) return;
+    var stops = [].slice.call(lb.querySelectorAll('button,[href],[tabindex]:not([tabindex="-1"])'))
+                  .filter(function(el){ return el.offsetParent !== null; });
+    if (!stops.length) return;
+    var first = stops[0], last = stops[stops.length - 1];
+    if (e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+  });
 
   // Swipe between photographs. A drag is a swipe only when it is decisively
   // sideways: a mostly-vertical one is someone trying to dismiss or scroll,
@@ -2396,23 +2507,48 @@ GALLERY_JS = r"""
   });
   DATA.forEach(function(p, i){ ID_TO_I[String(p.id).toLowerCase()] = i; });
 
-  function pageUrl(){ return location.href.split('#')[0]; }
-  function currentHash(){
+  // What is open, as a pair, or null on the index.
+  function currentTarget(){
     if (lb.classList.contains('open') && cur >= 0 && order.length)
-      return '#photo=' + DATA[order[cur]].id;
-    if (view === 'folders' && openGroup >= 0) return '#folder=' + SLUGS[openGroup];
-    return '';
+      return ['photo', DATA[order[cur]].id];
+    if (view === 'folders' && openGroup >= 0) return ['folder', SLUGS[openGroup]];
+    return null;
   }
+  // The address for what is open now. A query string rather than a '#',
+  // because a '#' never leaves the browser: a link preview is built by a
+  // machine fetching the address, and it only ever sees this part. Any other
+  // query the page arrived with - a Ghost referral tag, say - is kept.
+  function linkUrl(target){
+    var u = location.href.split('#')[0].split('?');
+    var keep = (u[1] || '').split('&').filter(function(kv){
+      return kv && kv.indexOf('photo=') !== 0 && kv.indexOf('folder=') !== 0;
+    });
+    if (target) keep.push(target[0] + '=' + encodeURIComponent(target[1]));
+    return u[0] + (keep.length ? '?' + keep.join('&') : '');
+  }
+  // The browser's own title follows what is open, so a tab, a bookmark and a
+  // history entry all name the thing being looked at rather than the page it
+  // sits on - and say the same as the card a shared link draws.
+  var BASE_TITLE = document.title;
+  function syncTitle(){
+    var t = currentTarget();
+    if (!t) document.title = BASE_TITLE;
+    else if (t[0] === 'photo')
+      document.title = (DATA[order[cur]] && DATA[order[cur]].n) || BASE_TITLE;
+    else document.title = GROUPS[openGroup] || BASE_TITLE;
+  }
+
   // push: a new history entry. Otherwise the current one is rewritten, and
   // keeps knowing whether this page pushed it - which is what decides whether
   // closing something can safely go Back, or would leave the site.
   function writeHash(kind, push){
     try {
-      var st = history.state, url = pageUrl() + currentHash();
+      var st = history.state, url = linkUrl(currentTarget());
       if (push) history.pushState({psc: kind, pushed: true}, '', url);
       else history.replaceState({psc: kind, pushed: !!(st && st.pushed && st.psc === kind)},
                                 '', url);
     } catch (e) {}
+    syncTitle();
   }
   function pushedHere(kind){
     var st = history.state;
@@ -2433,19 +2569,30 @@ GALLERY_JS = r"""
     closeFolder(); writeHash('', false);
   }
 
-  function readHash(){
-    var m = /^#(folder|photo)=([^&]+)$/.exec(location.hash || '');
-    return m ? {kind: m[1], key: linkKey(m[2])} : null;
+  // Reads the query string, and still honours the '#' form that earlier
+  // versions of this page produced, so links already sent out keep working.
+  function readTarget(){
+    var q = (location.search || '').replace(/^\?/, '').split('&');
+    for (var i = 0; i < q.length; i++){
+      var m = /^(folder|photo)=(.+)$/.exec(q[i]);
+      if (m) return {kind: m[1], key: linkKey(m[2])};
+    }
+    var h = /^#(folder|photo)=([^&]+)$/.exec(location.hash || '');
+    return h ? {kind: h[1], key: linkKey(h[2]), wasHash: true} : null;
   }
   function notHere(kind){
     toast(kind === 'photo' ? 'That photograph is no longer in this gallery'
                            : 'That folder is no longer in this gallery');
-    try { history.replaceState(null, '', pageUrl() + currentHash()); } catch (e) {}
+    try { history.replaceState(null, '', linkUrl(currentTarget())); } catch (e) {}
   }
   // first: the page has just loaded from a link. Otherwise Back or Forward
   // has moved between entries this page made.
-  function followLink(first){
-    var t = readHash(), lbOpen = lb.classList.contains('open');
+  function openFromLink(first){
+    var t = readTarget(), lbOpen = lb.classList.contains('open');
+    // An old '#' link is rewritten to the shareable form on arrival, so
+    // copying the address from the bar gives a link that previews.
+    if (t && t.wasHash && first)
+      try { history.replaceState(history.state, '', linkUrl([t.kind, t.key])); } catch (e) {}
     if (!t){
       // A hash that is not one of ours - Ghost's own #/portal/, say - is left
       // alone on arrival. Arriving back at one means leaving our states.
@@ -2478,6 +2625,8 @@ GALLERY_JS = r"""
       show();
     } else openLb(i);
   }
+  // followLink returns from several places; the title follows all of them.
+  function followLink(first){ openFromLink(first); syncTitle(); }
   window.addEventListener('popstate', function(){ followLink(false); });
 
   // ---- copy or share a link -----------------------------------------------
@@ -2504,16 +2653,21 @@ GALLERY_JS = r"""
   }
   var lbLink = lb.querySelector('.psc-link-lb');
   var crumbLink = root.querySelector('.psc-crumb .psc-link');
-  [lbLink, crumbLink].forEach(function(b){ if (b && canShare) b.textContent = 'Share'; });
+  // On a phone the overlay is the photograph, so 'Share' needs no object and
+  // the button stays narrow. The header is a row of controls, where it does.
+  if (canShare){
+    if (lbLink) lbLink.textContent = 'Share';
+    if (crumbLink) crumbLink.textContent = 'Share gallery';
+  }
   if (lbLink) lbLink.addEventListener('click', function(e){
     e.stopPropagation();                   // the backdrop closes the overlay
     if (cur < 0 || !order.length) return;
     var p = DATA[order[cur]];
-    shareLink(pageUrl() + '#photo=' + p.id, p.n || document.title);
+    shareLink(linkUrl(['photo', p.id]), p.n || document.title);
   });
   if (crumbLink) crumbLink.addEventListener('click', function(){
     if (openGroup < 0) return;
-    shareLink(pageUrl() + '#folder=' + SLUGS[openGroup], GROUPS[openGroup]);
+    shareLink(linkUrl(['folder', SLUGS[openGroup]]), GROUPS[openGroup]);
   });
 
   apply();
@@ -2622,7 +2776,7 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
     view_class = " psc-view-folders" if view == "folders" else ""
     return (
         f'<div class="psc-wrap{" psc-bleed" if bleed else ""}{view_class}"'
-        f' data-view="{view}"{hearts_attr}>'
+        f' data-view="{view}"{hearts_attr} role="region" aria-label="Photo gallery">'
         + css +
         '<div class="psc-bar">'
         # Folders first and leftmost: it is the way in, and on a phone the bar
@@ -2642,11 +2796,11 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
            if hearts_url else '') +
         '<span class="psc-searchwrap">'
         '<span class="psc-chips"></span>'
-        '<input class="psc-q" type="search" '
+        '<input class="psc-q" type="search" aria-label="Search photographs" '
         'placeholder="search name, folder, date, rating or tag">'
         '<span class="psc-tagmenu"></span>'
         '</span>'
-        '<select class="psc-sort" title="Sort order">'
+        '<select class="psc-sort" title="Sort order" aria-label="Sort order">'
         # Score first, so it is what the page opens on. The heart options sit
         # under it rather than above: with them first, a gallery published with
         # a heart service would have defaulted to Most liked.
@@ -2669,30 +2823,33 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
         '<button class="psc-bigger" type="button" aria-label="Larger thumbnails" '
         'title="Larger thumbnails, fewer per row">+</button>'
         '</span>'
-        f'<span class="psc-count">{top + strong} of {top + strong}</span>'
+        f'<span class="psc-count" role="status" aria-live="polite">'
+        f'{top + strong} of {top + strong}</span>'
         '</div>'
-        '<div class="psc-toast"></div>'
+        '<div class="psc-toast" role="status" aria-live="polite"></div>'
         '<div class="psc-crumb">'
         '<button class="psc-back" type="button">&#8249; All folders</button>'
         '<h3></h3><span class="psc-crumbn"></span>'
         '<button class="psc-link" type="button" '
-        'title="Copy a link that opens this folder">Copy link</button>'
+        'title="Copy a link that opens this folder">Copy link to gallery</button>'
         '</div>'
         '<div class="psc-folders"></div>'
         '<div class="psc-empty">Nothing matches that search.</div>'
         '<div class="psc-grid"></div>'
-        '<div class="psc-lb">'
+        '<div class="psc-lb" role="dialog" aria-modal="true" tabindex="-1" '
+        'aria-label="Photograph">'
         '<button class="x" type="button" aria-label="Close">&times;</button>'
         '<button class="psc-nav psc-prev" type="button" aria-label="Previous">&#8249;</button>'
         '<button class="psc-nav psc-next" type="button" aria-label="Next">&#8250;</button>'
         '<span class="psc-cap"></span><span class="psc-dims-lb"></span>'
         + ('<div class="psc-hearts psc-hearts-lb psc-pending">'
-           '<button class="psc-heart" type="button" aria-pressed="false">'
+           '<button class="psc-heart" type="button" aria-pressed="false" '
+           'aria-label="Like this photograph">'
            '\u2764\ufe0f</button><span class="psc-hcount"></span></div>'
            if hearts_url else '') +
         '<span class="psc-count-lb"></span>'
         '<button class="psc-link-lb" type="button" '
-        'title="Copy a link that opens this photograph">Copy link</button>'
+        'title="Copy a link that opens this photograph">Copy link to photo</button>'
         '<img alt=""></div>'
         '<div class="psc-foot">Generated by '
         # noopener, deliberately without noreferrer: the latter would strip the
@@ -2901,6 +3058,10 @@ def main(argv=None) -> int:
                     help="Heading shown above the gallery. Blank by default, "
                          "which also collapses the theme's heading band so the "
                          "photographs start at the top of the page.")
+    ap.add_argument("--description", default=DEFAULT_DESCRIPTION, metavar="TEXT",
+                    help="What a link to the gallery says underneath its title "
+                         "when it is shared, and what search engines show. Pass "
+                         "an empty string to leave whatever Ghost already has.")
     ap.add_argument("--status", choices=("draft", "published"), default="draft",
                     help="Publish state of the Ghost page (default draft, so you "
                          "can look before it goes live)")
@@ -3176,10 +3337,12 @@ def main(argv=None) -> int:
     lexical = lexical_with_html_card(gallery)
     existing = client.find_page(args.slug)
     if existing:
-        page = client.update_page(existing, page_title, lexical, args.status)
+        page = client.update_page(existing, page_title, lexical, args.status,
+                                  args.description)
         ps.log(f"Updated existing page /{page['slug']}/ ({page['status']})")
     else:
-        page = client.create_page(args.slug, page_title, lexical, args.status)
+        page = client.create_page(args.slug, page_title, lexical, args.status,
+                                  args.description)
         ps.log(f"Created page /{page['slug']}/ ({page['status']})")
 
     ps.log(f"View: {args.site.rstrip('/')}/{page['slug']}/")

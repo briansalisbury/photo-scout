@@ -1,0 +1,27 @@
+# Copy to wrangler.toml and edit the route. See worker/README.md.
+#
+#   cp wrangler.toml.example wrangler.toml
+#   npx wrangler deploy
+#
+# wrangler.toml is git-ignored: it carries your own domain, this file does not.
+
+name = "photo-previews"
+main = "preview-worker.js"
+compatibility_date = "2025-01-01"
+
+# The one page your gallery is on - NOT the whole site. Everything outside this
+# route never reaches the Worker, which is the point.
+#
+# zone_name is your domain as Cloudflare lists it; pattern is the path.
+[[routes]]
+pattern = "example.com/photos/*"
+zone_name = "example.com"
+
+# A gallery at the root of a subdomain instead:
+#
+# [[routes]]
+# pattern = "photos.example.com/*"
+# zone_name = "example.com"
+
+# Nothing else is needed. The Worker has no variables, no secrets, no storage
+# and no bindings; the address it works on comes from the request.

@@ -97,11 +97,14 @@ h = REPORT.read_text(encoding="utf-8")
 
 print("=== what Python wrote ===")
 check("the cards are parked in a template, not in the grid",
-      '<template id="cardsrc">' in h and '<main id="grid"></main>' in h)
+      '<template id="cardsrc">' in h and '<div id="grid"></div>' in h)
+# Counted inside the template, not across the whole document: the page's own
+# script mentions these attribute names too.
+CARDS = h.split('<template id="cardsrc">', 1)[1].split("</template>", 1)[0]
 check("every card carries the gallery it belongs to",
-      h.count("data-group=") == TOTAL, str(h.count("data-group=")))
+      CARDS.count("data-group=") == TOTAL, str(CARDS.count("data-group=")))
 check("and the thumbnail the tile needs before the card exists",
-      h.count("data-thumb=") == TOTAL, str(h.count("data-thumb=")))
+      CARDS.count("data-thumb=") == TOTAL, str(CARDS.count("data-thumb=")))
 check("the outline colour was resolved, not left as a placeholder",
       "__FOLDLINE__" not in h and ps.DEFAULT_FOLDER_OUTLINE in h)
 check("a subfolder merges into its parent",

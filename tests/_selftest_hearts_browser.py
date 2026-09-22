@@ -458,6 +458,14 @@ with sync_playwright() as pw:
           P.eval_on_selector(".psc-count", "e => e.textContent"))
     check("the button shows as active",
           P.eval_on_selector(".psc-likedonly", "e => e.classList.contains('on')"))
+    # Liked on means "this filter is switched on"; the share button means "do
+    # something". They must not arrive at the same color, which is the one
+    # pairing the folders suite cannot check, having no heart service.
+    check("and is not the color of the share button",
+          P.eval_on_selector(".psc-likedonly", "e => getComputedStyle(e).backgroundColor")
+          != P.eval_on_selector(".psc-link-lb",
+                                "e => getComputedStyle(e).backgroundColor"),
+          P.eval_on_selector(".psc-likedonly", "e => getComputedStyle(e).backgroundColor"))
 
     print("\n--- and it composes with the other filters")
     P.click('.psc-bar button[data-band="STRONG"]'); P.wait_for_timeout(300)

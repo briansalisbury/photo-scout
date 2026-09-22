@@ -481,10 +481,10 @@ with sync_playwright() as pw:
     P.set_viewport_size({"width": 390, "height": 844})   # iPhone 13
     P.wait_for_timeout(200)
     ncols = lambda: len(P.eval_on_selector(
-        "main", "e => getComputedStyle(e).gridTemplateColumns").split(" "))
+        "#grid", "e => getComputedStyle(e).gridTemplateColumns").split(" "))
     check("the gutter tightens, which is what buys the third column",
-          P.eval_on_selector("main", "e => getComputedStyle(e).gap") == "8px",
-          P.eval_on_selector("main", "e => getComputedStyle(e).gap"))
+          P.eval_on_selector("#grid", "e => getComputedStyle(e).gap") == "8px",
+          P.eval_on_selector("#grid", "e => getComputedStyle(e).gap"))
     while not P.eval_on_selector("#smaller", "e => e.disabled"): P.click("#smaller")
     P.wait_for_timeout(150)
     check("zooming right out reaches three columns on a 390px screen",

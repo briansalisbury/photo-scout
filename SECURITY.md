@@ -48,6 +48,12 @@ page embed data derived from your file names, folder names and tags. Any input
 that escapes into executable markup — script injection, event handlers, markup
 breaking out of an attribute or a data block — is in scope.
 
+**The link-preview Worker (`worker/`).** Optional, and only where it is
+deployed, but it rewrites a response on its way to a visitor. Anything that
+lets a crafted link inject markup into the page, make the Worker fetch or
+disclose something other than the gallery page it fronts, or turn a working
+page into a broken one is in scope.
+
 **The read-only guarantee.** Photo Scout must never write, move or delete
 anything under `--root`. Any input that causes it to is a security bug, not just
 a defect. See CONTRIBUTING.md.

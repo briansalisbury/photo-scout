@@ -2,7 +2,7 @@
 
 Contributions are welcome: patches, documentation, and bug reports alike.
 
-Field reports are particularly valuable. Photo Scout is exercised by sixteen test
+Field reports are particularly valuable. Photo Scout is exercised by nineteen test
 suites, but a test library is a model of a real one, and models have edges. RAW
 files from a camera the project has not met, a folder structure nobody anticipated,
 an archive an order of magnitude larger than the ones it was built against — those
@@ -66,6 +66,9 @@ from anywhere — the path is resolved from the file's own location.
 pip install playwright numpy pillow flask waitress
 python -m playwright install chromium
 
+# _selftest_worker.py also needs node on PATH, for the optional link-preview
+# Worker. It skips itself when there is none.
+
 python tests/_selftest.py                  # walking, dedup, database, scoring maths
 python tests/_selftest_readonly.py         # proves the library is never modified
 ```
@@ -94,6 +97,9 @@ for t in tests/_selftest*.py; do python "$t" >/dev/null 2>&1 \
 | `_selftest_hearts.py` | The heart service: API, abuse handling, persistence |
 | `_selftest_hearts_browser.py` | Heart buttons in a browser, including with the service down |
 | `_selftest_folders.py` | Folder grouping, the index and its mosaics, and navigating in a browser |
+| `_selftest_local_folders.py` | The same index in the local report, built on demand as folders open |
+| `_selftest_worker.py` | The optional link-preview Worker, run under Node against real pages |
+| `_selftest_a11y.py` | WCAG 2.2 AA on both pages: names, roles, focus, contrast, target size |
 | `_selftest_security.py` | Script-block escaping, the plaintext-HTTP refusal, heart service limits |
 
 The browser suites are the slowest. They are also the ones that have caught the most.
@@ -141,6 +147,14 @@ Two rules for patches:
 derives it from `photo_scout.py` by targeted substitution. Edit the parent and
 re-run the generator; a hand-edit will be silently overwritten.
 
+**A folder's link is spelled in two places.** The gallery spells it in
+`photo_scout_ghost.py`, and `worker/preview.js` spells it again to resolve a
+link it is given, since the Worker runs before any of the page's JavaScript
+does. Change one and the other has to follow, or a link the gallery hands out
+previews as nothing. `_selftest_worker.py` catches that by clicking every
+folder in a browser and comparing what the page produces with what the Worker
+resolves.
+
 **The scoring defaults are placeholders.** `AESTHETIC_RANGE` and the band cutoffs
 get replaced automatically by calibration on first run. If you are comparing scores
 across machines, compare calibrated ones or you are comparing nothing.
@@ -153,6 +167,14 @@ Plain Python, no framework, standard library wherever it is reasonable. The hear
 service uses Flask because that is genuinely simpler than hand-rolling one; the
 Ghost client mints its own JWTs rather than adding a dependency for thirty lines of
 HMAC. Keep that balance unless a dependency really pays for itself.
+
+**Accessibility is a requirement, not a polish pass.** Both pages are held to
+WCAG 2.2 Level AA and `tests/_selftest_a11y.py` measures it in a browser rather
+than grepping for attributes. Two rules cover most of it: anything clickable is
+a `<button>` or a link, never a `<div>` or an `<img>` with a click handler; and
+anything that opens, closes or changes state moves focus somewhere sensible and
+says what it did. A new control needs a name a screen reader can read - its own
+text, or an `aria-label`. A `title` is a tooltip, not a name.
 
 **Comments explain why, not what.** This code is read far more often than it is
 written, frequently by people who are not professional developers. A comment that

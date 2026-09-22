@@ -2497,6 +2497,7 @@ def write_csv(rows, dest: Path, tags: Optional[dict] = None) -> None:
 # normal string Python reads \s as an invalid escape (a SyntaxWarning today,
 # a SyntaxError in a future version).
 HTML_TEMPLATE = r"""<!doctype html>
+<html lang="en">
 <meta charset="utf-8">
 <!-- Without this a phone lays the page out at 980px and then shrinks it, so
      the grid never reflows and every control is too small to hit. -->
@@ -2510,6 +2511,10 @@ HTML_TEMPLATE = r"""<!doctype html>
  .stats { color:#9a9a9a; font-size:13px; margin-bottom:10px; }
  .stats b { color:#e8e8e8; }
  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+ /* The label is the target - clicking it toggles the box - so it is the
+    label that has to be 24px tall, not the 13px box inside it. */
+ .controls label { display:inline-flex; align-items:center; gap:6px;
+   min-height:24px; }
  /* font-family:inherit because form controls do not inherit a font by
     default - they fall back to the browser's own, Arial on most systems,
     which sits visibly apart from the Segoe UI around it. */
@@ -2518,10 +2523,10 @@ HTML_TEMPLATE = r"""<!doctype html>
    cursor:pointer; }
  button.on { background:#2f6f4f; border-color:#3f8f68; }
  :root { --colw: 300px; }
- main { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--colw),1fr)); gap:14px; padding:18px; }
+ #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(var(--colw),1fr)); gap:14px; padding:18px; }
  /* On a phone the gutter, not the column width, is what keeps a third column
     off the screen: three 115px columns need 361px at 8px, 373px at 14px. */
- @media (max-width:600px) { main { gap:8px; padding:10px; } }
+ @media (max-width:600px) { #grid { gap:8px; padding:10px; } }
  /* Thumbnail size. Ctrl+scroll zooms the whole page; these reflow the grid,
     and give a touchscreen a way to do it at all. */
  #zoom { display:inline-flex; gap:4px; }
@@ -2548,15 +2553,16 @@ HTML_TEMPLATE = r"""<!doctype html>
  /* Two muted lines, split by how long each field can get. The folder is
     unbounded free text, so it takes a line to itself and truncates. The facts
     below it wrap rather than clip, so none of them can be cut off. */
- .folder { color:#7d7d7d; font-size:11.5px; margin-bottom:2px;
+ .folder { color:#858585; font-size:11.5px; margin-bottom:2px;
    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
  /* tabular-nums lines the figures up down a column of cards. */
- .specs { color:#6a6a6a; font-size:11px; margin-bottom:6px; line-height:1.45;
+ .specs { color:#858585; font-size:11px; margin-bottom:6px; line-height:1.45;
    font-variant-numeric:tabular-nums; }
  /* Each fact is atomic - a break may fall between them, never inside one. */
  .specs span { white-space:nowrap; }
  .card .folder:empty, .card .specs:empty { display:none; }
- .links a { color:#7fc4ff; text-decoration:none; font-size:12px; margin-right:12px; }
+ .links a { color:#7fc4ff; text-decoration:none; font-size:12px; margin-right:12px;
+   display:inline-block; padding:5px 0; min-height:14px; }
  .links a:hover { text-decoration:underline; }
 
  /* ---- tags ---------------------------------------------------------------
@@ -2570,9 +2576,13 @@ HTML_TEMPLATE = r"""<!doctype html>
  .tag button { all:unset; cursor:pointer; font-size:13px; line-height:1;
    opacity:.65; padding:0 1px; }
  .tag button:hover { opacity:1; }
+ /* min-height, here and on #q and the checkbox label: a pointer target has
+    to be 24px in both directions (WCAG 2.5.8). Each of these sits inside a
+    taller container already, so nothing on the page moves. */
  .taginput { flex:1; min-width:96px; background:#141414; border:1px dashed #3a3a3a;
-   color:#e8e8e8; border-radius:6px; padding:4px 7px; font-size:11.5px; }
- .taginput:focus { outline:none; border-color:#5a5a5a; border-style:solid; }
+   color:#e8e8e8; border-radius:6px; padding:4px 7px; font-size:11.5px;
+   min-height:24px; }
+ .taginput:focus { border-color:#5a5a5a; border-style:solid; }
  .taginput::placeholder { color:#6a6a6a; }
 
  /* ---- tag search box ---------------------------------------------------- */
@@ -2582,8 +2592,8 @@ HTML_TEMPLATE = r"""<!doctype html>
  #searchbox.focus { border-color:#5a7f9a; }
  #chips { display:contents; }
  #q { flex:1; min-width:120px; background:transparent; border:none; padding:3px 2px;
-   color:#e8e8e8; font-size:13px; }
- #q:focus { outline:none; }
+   color:#e8e8e8; font-size:13px; min-height:24px; }
+
  #tagmenu { position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
    background:#1d1d1d; border:1px solid #3a3a3a; border-radius:8px;
    max-height:260px; overflow:auto; display:none;
@@ -2601,7 +2611,7 @@ HTML_TEMPLATE = r"""<!doctype html>
  #tagmenu .none:hover { background:transparent; }
  .dup { opacity:.45; }
  .hidden { display:none !important; }
- footer { padding:24px; color:#777; font-size:12px; text-align:center; }
+ footer { padding:24px; color:#858585; font-size:12px; text-align:center; }
  footer a { color:#9a9a9a; text-decoration:none; border-bottom:1px solid #3a3a3a; }
  footer a:hover { color:#e8e8e8; border-bottom-color:#6a6a6a; }
  #toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
@@ -2613,6 +2623,17 @@ HTML_TEMPLATE = r"""<!doctype html>
     the page beneath it; only an action button inside it is clickable. */
  #toast button { pointer-events:auto; }
  .card img { cursor:zoom-in; }
+ /* The thumbnail is a button so a photograph can be opened from the keyboard;
+    stripped back to nothing, so the card looks as it always did. */
+ .shot { display:block; width:100%; padding:0; border:0; background:none;
+         cursor:zoom-in; font:inherit; color:inherit; }
+ /* Where the keyboard is - a light ring with a dark halo, so it shows on the
+    page and on top of a photograph alike. */
+ :focus-visible { outline:2px solid #f2f6fb; outline-offset:2px;
+                  box-shadow:0 0 0 4px rgba(0,0,0,.7); }
+ /* The header is pinned, so a card tabbed to would otherwise be scrolled
+    underneath it (WCAG 2.4.11). */
+ .card, .fold { scroll-margin-top:150px; }
 
  /* ---- lightbox ---- */
  #lb { position:fixed; inset:0; background:#0b0b0b; display:none;
@@ -2641,10 +2662,12 @@ HTML_TEMPLATE = r"""<!doctype html>
  #lb-stage.actual #lb-img { max-width:none; max-height:none; cursor:zoom-out; }
  #lb-note { padding:10px 16px; background:#141414; border-top:1px solid #2a2a2a;
    color:#c0c0c0; font-size:13px; flex:0 0 auto; }
+ /* Buttons rather than divs, so the arrows are reachable from the keyboard
+    as well as the mouse. font-family:inherit keeps them looking as they did. */
  .lb-nav { position:absolute; top:50%; transform:translateY(-50%);
    background:rgba(20,20,20,.72); border:1px solid #3a3a3a; color:#eee;
-   font-size:26px; line-height:1; padding:14px 18px; border-radius:10px;
-   cursor:pointer; user-select:none; z-index:2; }
+   font-family:inherit; font-size:26px; line-height:1; padding:14px 18px;
+   border-radius:10px; cursor:pointer; user-select:none; z-index:2; }
  .lb-nav:hover { background:rgba(45,45,45,.92); }
  #lb-prev { left:14px; } #lb-next { right:14px; }
  #lb-missing { color:#f0b0b0; font-size:14px; padding:40px; text-align:center;
@@ -2679,10 +2702,10 @@ HTML_TEMPLATE = r"""<!doctype html>
    row-gap:calc(14px + var(--tab));
    grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--colw)),1fr)); }
  body.view-folders #folders { display:grid; }
- body.view-folders main { display:none; }
+ body.view-folders #grid { display:none; }
  /* Inside a folder the index goes away and the ordinary grid comes back. */
  body.view-folders.folder-open #folders { display:none; }
- body.view-folders.folder-open main { display:grid; }
+ body.view-folders.folder-open #grid { display:grid; }
 
  /* flex-column rather than block: a button centers its contents vertically by
     default, which leaves a gap above the mosaic on any tile shorter than its
@@ -2802,7 +2825,7 @@ HTML_TEMPLATE = r"""<!doctype html>
 </style>
 <header>
   <h1>Photo Scout &mdash; shortlist <span style="font-weight:400;color:#9a9a9a">(top picks &amp; strong only)</span></h1>
-  <div class="stats">__STATS__ &middot; <b id="shown"></b></div>
+  <div class="stats">__STATS__ &middot; <b id="shown" role="status" aria-live="polite"></b></div>
   <div class="controls">
     <button data-f="all" class="on">All</button>
     <button data-f="TOP PICK">Top picks</button>
@@ -2811,8 +2834,8 @@ HTML_TEMPLATE = r"""<!doctype html>
       <button type="button" data-view="folders">Folders</button>
       <button type="button" data-view="all">All photos</button>
     </span>
-    <select id="folder" style="margin-left:10px;max-width:340px">__FOLDER_OPTIONS__</select>
-    <select id="sort" title="Sort order">
+    <select id="folder" aria-label="Folder" style="margin-left:10px;max-width:340px">__FOLDER_OPTIONS__</select>
+    <select id="sort" title="Sort order" aria-label="Sort order">
       <option value="score-desc">Score, highest first</option>
       <option value="score-asc">Score, lowest first</option>
       <option value="date-desc">Date, newest first</option>
@@ -2822,7 +2845,7 @@ HTML_TEMPLATE = r"""<!doctype html>
       <option value="name-asc">File name A-Z</option>
       <option value="name-desc">File name Z-A</option>
     </select>
-    <select id="kind">
+    <select id="kind" aria-label="Photos or video frames">
       <option value="all">Photos + video frames</option>
       <option value="photo">Photos only</option>
       <option value="video">Video frames only</option>
@@ -2836,7 +2859,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     </span>
     <div id="searchbox">
       <span id="chips"></span>
-      <input type="search" id="q" autocomplete="off"
+      <input type="search" id="q" autocomplete="off" aria-label="Filter photographs"
              placeholder="filter by folder, filename or tag">
       <div id="tagmenu"></div>
     </div>
@@ -2844,11 +2867,12 @@ HTML_TEMPLATE = r"""<!doctype html>
       Save tags</button>
   </div>
 </header>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
-<div id="lb">
+<div id="lb" role="dialog" aria-modal="true" tabindex="-1"
+     aria-label="Photograph">
   <div id="lb-bar">
-    <button id="lb-close" title="Esc">&times;</button>
+    <button id="lb-close" type="button" title="Esc" aria-label="Close">&times;</button>
     <span id="lb-count" style="color:#8a8a8a;font-size:12px"></span>
     <span class="grow">
       <div id="lb-name"></div>
@@ -2861,16 +2885,17 @@ HTML_TEMPLATE = r"""<!doctype html>
     <button id="lb-copy" title="Copy the full path">copy path</button>
   </div>
   <div id="lb-stage">
-    <div id="lb-prev" class="lb-nav">&#8249;</div>
+    <button id="lb-prev" class="lb-nav" type="button" aria-label="Previous">&#8249;</button>
     <img id="lb-img" alt="">
     <div id="lb-missing">
       No preview was generated for this image.<br>
       Re-run without <code>--no-previews</code> to create one.
     </div>
-    <div id="lb-next" class="lb-nav">&#8250;</div>
+    <button id="lb-next" class="lb-nav" type="button" aria-label="Next">&#8250;</button>
   </div>
   <div id="lb-note"></div>
 </div>
+<main>
 <div id="crumb">
   <button id="back" type="button">&lsaquo; All folders</button>
   <h2></h2><span id="crumbn"></span>
@@ -2885,7 +2910,8 @@ HTML_TEMPLATE = r"""<!doctype html>
 <template id="cardsrc">
 __CARDS__
 </template>
-<main id="grid"></main>
+<div id="grid"></div>
+</main>
 <footer>Generated by <a href="__PROJECT_URL__" target="_blank" rel="noopener">Photo Scout</a> &middot; scores are model estimates, not verdicts &mdash; trust your eye.&trade;</footer>
 <script>
  const grid = document.getElementById('grid');
@@ -3616,13 +3642,30 @@ __CARDS__
  // a folder you have never seen is disorienting.
  const toTop = () => window.scrollTo({top: 0});
 
+ // Focus after the browser has laid the new state out: setting it on an
+ // element that is still display:none does nothing at all.
+ function focusSoon(el) {
+   if (!el) return;
+   requestAnimationFrame(() => {
+     if (el.isConnected && el.offsetParent !== null) el.focus();
+   });
+ }
+
  function openFolder(gi) {
    openGroup = gi;
    crumbEl.querySelector('h2').textContent = GROUPS[gi];
    ensureView();                 // this is where a folder's cards come in
    syncBar(); apply(); toTop();
+   // The tile just activated has been hidden, which would drop the keyboard
+   // back to the top of the document; the way out is where it belongs.
+   focusSoon(document.getElementById('back'));
  }
- function closeFolder() { openGroup = -1; syncBar(); apply(); toTop(); }
+ function closeFolder() {
+   const was = openGroup;
+   openGroup = -1;
+   syncBar(); apply(); toTop();
+   focusSoon(document.querySelector('.fold[data-group="' + was + '"]'));
+ }
  function setView(v) {
    view = v; openGroup = -1;
    try { localStorage.setItem(VIEW_KEY, v); } catch (e) {}
@@ -3730,6 +3773,7 @@ __CARDS__
  const lb = document.getElementById('lb'), stage = document.getElementById('lb-stage');
  const lbImg = document.getElementById('lb-img');
  let idx = -1;
+ let lbReturn = null;                   // where the keyboard came from
 
  // Queried from the grid, NOT filtered out of the `cards` snapshot: that array
  // keeps the order the cards were created in, so after a sort it no longer
@@ -3738,6 +3782,8 @@ __CARDS__
  const visible = () => [...grid.querySelectorAll('.card:not(.hidden)')];
 
  function show(i) {
+   const wasOpen = lb.classList.contains('open');
+   if (!wasOpen) lbReturn = document.activeElement;
    const list = visible();
    if (!list.length) return;
    idx = (i + list.length) % list.length;
@@ -3745,6 +3791,7 @@ __CARDS__
    const prev = c.dataset.preview;
    lb.classList.toggle('no-image', !prev);
    lbImg.src = prev || '';
+   lbImg.alt = c.dataset.name || '';
    document.getElementById('lb-name').textContent = c.dataset.name;
    document.getElementById('lb-sub').textContent =
      [c.dataset.folder, c.dataset.verdicttext + '  ' + c.dataset.score]
@@ -3758,6 +3805,7 @@ __CARDS__
    stage.classList.remove('actual');
    stage.scrollTop = stage.scrollLeft = 0;
    lb.classList.add('open');
+   if (!wasOpen) focusSoon(document.getElementById('lb-close'));
    // Warm the neighbors so arrow-key paging feels instant.
    [list[(idx + 1) % list.length], list[(idx - 1 + list.length) % list.length]]
      .forEach(n => { if (n && n.dataset.preview) new Image().src = n.dataset.preview; });
@@ -3770,7 +3818,24 @@ __CARDS__
    lb.classList.remove('open');
    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
    if (c) c.scrollIntoView({ block: 'center' });
+   // Back to where the keyboard was, or to this photograph's own thumbnail.
+   const back = (lbReturn && lbReturn.isConnected && lbReturn.offsetParent !== null)
+     ? lbReturn : (c && c.querySelector('.shot'));
+   lbReturn = null;
+   focusSoon(back);
  }
+
+ // Tab stays inside the overlay while it is open, rather than walking off
+ // into the page behind it.
+ lb.addEventListener('keydown', e => {
+   if (e.key !== 'Tab' || !lb.classList.contains('open')) return;
+   const stops = [...lb.querySelectorAll('button,[href],[tabindex]:not([tabindex="-1"])')]
+     .filter(el => el.offsetParent !== null);
+   if (!stops.length) return;
+   const first = stops[0], last = stops[stops.length - 1];
+   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+ });
 
  // A two-finger sideways flick on a trackpad arrives as wheel events carrying
  // deltaX. Momentum fires dozens of them, so the accumulator locks after one
@@ -3817,9 +3882,9 @@ __CARDS__
  }
 
  grid.addEventListener('click', ev => {
-   const img = ev.target.closest('.card img');
-   if (!img) return;
-   const card = img.closest('.card');
+   const shot = ev.target.closest('.card .shot');
+   if (!shot) return;
+   const card = shot.closest('.card');
    const list = visible();
    const at = list.indexOf(card);
    if (at >= 0) show(at);
@@ -4104,7 +4169,8 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
    data-res="{html.escape(res_txt, quote=True)}"
    data-score="{(r['composite'] or 0):.0f}"
    data-note="{html.escape(r['note'] or '', quote=True)}">
-  <img loading="lazy" src="{html.escape(thumb)}" alt="">
+  <button class="shot" type="button" aria-label="Open {html.escape(r['filename'], quote=True)}">
+    <img loading="lazy" src="{html.escape(thumb)}" alt=""></button>
   <div class="body">
     <div class="top">
       <span>{vid_badge}<span class="badge {verdict.replace(' ', '-')}">{html.escape(verdict)}</span></span>
@@ -4116,6 +4182,7 @@ def write_html(rows, dest: Path, root: Path, stats: dict,
     <div class="links">{links}</div>
     <div class="tagwrap"><div class="taglist">
       <input class="taginput" type="text" autocomplete="off" spellcheck="false"
+             aria-label="Add a tag to {html.escape(r['filename'], quote=True)}"
              placeholder="add tag, comma or Enter">
     </div></div>
   </div>

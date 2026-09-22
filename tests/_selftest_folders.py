@@ -227,6 +227,9 @@ for k, it in enumerate(items):
 page_html = pg.build_gallery_html(items, {})
 (OUT / "live.html").write_text(
     "<!doctype html><meta charset='utf-8'>"
+    # A title, as Ghost gives the page, so the gallery has something to put
+    # back when nothing is open.
+    "<title>Photo Scout Gallery</title>"
     "<body style='margin:0;background:#000'>" + page_html, encoding="utf-8")
 
 from playwright.sync_api import sync_playwright                      # noqa: E402
@@ -560,6 +563,18 @@ with sync_playwright() as pw:
         return P4.eval_on_selector(sel, "e => getComputedStyle(e).backgroundColor")
     check("the active view and the active band are different colours",
           bg4(".psc-views button.on") != bg4(".psc-bar button[data-band].on"))
+    # The header carries the longest label on the page - "Copy link to gallery"
+    # - beside a folder name that can be long in its own right.
+    P4.click(".psc-fold"); P4.wait_for_timeout(300)
+    check("an open folder's header fits a phone too",
+          P4.evaluate("document.documentElement.scrollWidth <= "
+                      "document.documentElement.clientWidth + 1"),
+          str(P4.evaluate("[document.documentElement.scrollWidth, "
+                          "document.documentElement.clientWidth]")))
+    check("with its link button on screen",
+          P4.eval_on_selector(".psc-crumb .psc-link",
+                              "e => e.getBoundingClientRect().right <= innerWidth + 1"))
+    P4.click(".psc-back"); P4.wait_for_timeout(200)
 
     print("\n--- the lightbox under a serif theme ---")
     # The overlay and the toast are moved out to <body>, beyond the gallery, so
@@ -605,72 +620,180 @@ with sync_playwright() as pw:
         return L.eval_on_selector(".psc-lb", "e => e.classList.contains('open')")
     def hash_():
         return L.evaluate("location.hash")
+    def q_():
+        return L.evaluate("location.search")
 
-    L.goto(base + "#folder=wyoming-and-tetons"); L.wait_for_timeout(500)
+    # A query string, not a '#': the '#' never leaves the browser, so a link
+    # preview robot - which only ever sees the address - could not tell one
+    # photograph from another. See worker/preview.js.
+    L.goto(base + "?folder=wyoming-and-tetons"); L.wait_for_timeout(500)
     check("a folder link opens that folder",
           L.inner_text(".psc-crumb h3") == "Wyoming and Tetons" and lvis(".psc-fold") == 0,
           L.inner_text(".psc-crumb h3"))
     check("with the overlay closed", not lb_open())
+    check("the folder's button says what it copies a link to",
+          L.inner_text(".psc-crumb .psc-link").strip() == "Copy link to gallery",
+          L.inner_text(".psc-crumb .psc-link"))
     L.click(".psc-crumb .psc-link"); L.wait_for_timeout(200)
     check("the folder's own button copies a link to it",
-          (L.evaluate("window.__copied") or "").endswith("#folder=wyoming-and-tetons"),
+          (L.evaluate("window.__copied") or "").endswith("?folder=wyoming-and-tetons"),
           L.evaluate("window.__copied"))
     check("and says so", "Link copied" in L.inner_text(".psc-toast"))
 
-    L.goto(base + "#photo=" + target["id"]); L.wait_for_timeout(500)
+    L.goto(base + "?photo=" + target["id"]); L.wait_for_timeout(500)
     check("a photograph link opens that photograph", lb_open()
           and L.inner_text(".psc-lb .psc-cap") == target["n"], L.inner_text(".psc-lb .psc-cap"))
     check("inside its own folder, so the arrows walk that shoot",
           L.inner_text(".psc-count-lb").endswith(f"/ {len(wy_photos)}"),
           L.inner_text(".psc-count-lb"))
+    check("and the overlay's button says the same of the photograph",
+          L.inner_text(".psc-link-lb").strip() == "Copy link to photo",
+          L.inner_text(".psc-link-lb"))
     L.click(".psc-link-lb"); L.wait_for_timeout(200)
     check("the overlay's button copies a link to the photograph on screen",
-          (L.evaluate("window.__copied") or "").endswith("#photo=" + target["id"]),
+          (L.evaluate("window.__copied") or "").endswith("?photo=" + target["id"]),
           L.evaluate("window.__copied"))
     check("without closing the overlay", lb_open())
     before = L.evaluate("history.length")
     L.keyboard.press("ArrowRight"); L.wait_for_timeout(200)
     L.keyboard.press("ArrowRight"); L.wait_for_timeout(200)
     check("stepping moves the link along with the photograph",
-          hash_().startswith("#photo=") and hash_() != "#photo=" + target["id"], hash_())
+          q_().startswith("?photo=") and q_() != "?photo=" + target["id"], q_())
     check("without piling up history", L.evaluate("history.length") == before,
           f"{before} -> {L.evaluate('history.length')}")
     L.keyboard.press("Escape"); L.wait_for_timeout(300)
     check("closing an overlay that came from a link stays in the gallery",
-          not lb_open() and hash_() == "#folder=wyoming-and-tetons"
-          and L.evaluate("location.href").startswith(base), hash_())
+          not lb_open() and q_() == "?folder=wyoming-and-tetons"
+          and L.evaluate("location.href").startswith(base), q_())
+
+    print("\n--- the title follows what is open ---")
+    # A tab, a bookmark and a history entry should name the thing on screen,
+    # and say what a shared link's card would say for the same address.
+    L.goto(base); L.wait_for_timeout(400)
+    check("the index keeps the page's own title",
+          L.title() == "Photo Scout Gallery", L.title())
+    L.click(f'.psc-fold[data-group="{wy}"]'); L.wait_for_timeout(300)
+    check("an open folder is named by the folder", L.title() == "Wyoming and Tetons",
+          L.title())
+    L.click(".psc-card:not(.psc-hidden) img"); L.wait_for_timeout(300)
+    check("an open photograph by its file name", L.title().endswith(".NEF"), L.title())
+    L.keyboard.press("ArrowRight"); L.wait_for_timeout(250)
+    check("and it moves with the arrows", L.title().endswith(".NEF"), L.title())
+    L.keyboard.press("Escape"); L.wait_for_timeout(300)
+    check("closing the photograph gives the folder back",
+          L.title() == "Wyoming and Tetons", L.title())
+    L.click(".psc-back"); L.wait_for_timeout(300)
+    check("and closing the folder gives the page back",
+          L.title() == "Photo Scout Gallery", L.title())
+    L.goto(base + "?photo=" + target["id"]); L.wait_for_timeout(500)
+    check("a link arrives with the right title already set",
+          L.title() == target["n"], L.title())
+
+    print("\n--- the share buttons stand apart ---")
+    # They are the one control on the page acting on somebody else's behalf, so
+    # they carry a hue of their own rather than the gray of the row they sit in
+    # - and not the tan of an active view or the crimson of Liked, which mean
+    # "this is switched on" and would read as a state rather than an action.
+    def style(sel, prop):
+        return L.eval_on_selector(sel, f"e => getComputedStyle(e).{prop}")
+    def contrast(a, b):
+        # Measured on what the browser actually computed, not on the hex in the
+        # stylesheet, so a rule that never applied cannot pass this.
+        return pg.contrast(*[tuple(int(v) / 255 for v in re.findall(r"\d+", c)[:3])
+                             for c in (a, b)])
+    link_bg = style(".psc-crumb .psc-link", "backgroundColor")
+    for sel, what in ((".psc-back", "the way back"),
+                      (".psc-views button.on", "the active view"),
+                      (".psc-bar button[data-band].on", "the active band")):
+        check(f"the link button is not colored like {what}",
+              link_bg != style(sel, "backgroundColor"), link_bg)
+    # Liked only exists where a heart service is configured, which this page's
+    # fixture has not; its color is checked in the hearts suite.
+    if L.eval_on_selector_all(".psc-likedonly", "els => els.length"):
+        L.click(".psc-likedonly"); L.wait_for_timeout(200)
+        check("nor like Liked when it is switched on",
+              link_bg != style(".psc-likedonly.on", "backgroundColor"),
+              style(".psc-likedonly.on", "backgroundColor"))
+        L.click(".psc-likedonly"); L.wait_for_timeout(200)
+    check("the way back is colored like the view it belongs to",
+          style(".psc-crumb .psc-back", "backgroundColor")
+          == style(".psc-views button.on", "backgroundColor"),
+          style(".psc-crumb .psc-back", "backgroundColor"))
+    check("and the two share buttons agree with each other",
+          style(".psc-crumb .psc-link", "color") == style(".psc-link-lb", "color"),
+          style(".psc-link-lb", "color"))
+    # A border has to clear 3:1 against what is behind it to be seen at all.
+    check("the button's edge is visible against the page",
+          contrast(style(".psc-crumb .psc-link", "borderTopColor"),
+                   style(".psc-wrap", "backgroundColor")) >= 3,
+          f'{contrast(style(".psc-crumb .psc-link", "borderTopColor"), style(".psc-wrap", "backgroundColor")):.2f}:1')
+    check("and its text is readable on it",
+          contrast(style(".psc-crumb .psc-link", "color"), link_bg) >= 4.5,
+          f'{contrast(style(".psc-crumb .psc-link", "color"), link_bg):.2f}:1')
+
+    print("\n--- links sent out by earlier versions of the page ---")
+    # Those carried a '#'. They still open the right thing, and the address is
+    # quietly rewritten, so copying it from the bar gives a link that previews.
+    L.goto(base + "#photo=" + target["id"]); L.wait_for_timeout(500)
+    check("an old '#' link to a photograph still opens it",
+          lb_open() and L.inner_text(".psc-lb .psc-cap") == target["n"],
+          L.inner_text(".psc-lb .psc-cap"))
+    check("and the address becomes the shareable form",
+          q_() == "?photo=" + target["id"] and hash_() == "", q_() + hash_())
+    L.goto(base + "#folder=wyoming-and-tetons"); L.wait_for_timeout(500)
+    check("an old '#' link to a folder still opens it",
+          L.inner_text(".psc-crumb h3") == "Wyoming and Tetons")
+    check("and is rewritten the same way",
+          q_() == "?folder=wyoming-and-tetons" and hash_() == "", q_() + hash_())
+
+    print("\n--- a query the page arrived with is kept ---")
+    # A referral tag or a campaign parameter belongs to whoever sent the
+    # visitor; opening a folder must not throw it away.
+    L.goto(base + "?ref=newsletter"); L.wait_for_timeout(500)
+    L.click(f'.psc-fold[data-group="{wy}"]'); L.wait_for_timeout(300)
+    check("opening a folder keeps somebody else's parameter",
+          q_() == "?ref=newsletter&folder=wyoming-and-tetons", q_())
+    L.click(".psc-crumb .psc-link"); L.wait_for_timeout(200)
+    check("and the copied link carries it too",
+          (L.evaluate("window.__copied") or "")
+          .endswith("?ref=newsletter&folder=wyoming-and-tetons"),
+          L.evaluate("window.__copied"))
+    L.click(".psc-back"); L.wait_for_timeout(300)
+    check("closing the folder leaves it alone", q_() == "?ref=newsletter", q_())
 
     # Built up by clicking, then taken apart with Back, as a phone would.
     L.goto(base); L.wait_for_timeout(500)
     L.evaluate("() => { try { localStorage.clear(); } catch (e) {} }")
     L.goto(base); L.wait_for_timeout(500)
     L.click(f'.psc-fold[data-group="{wy}"]'); L.wait_for_timeout(300)
-    check("opening a folder puts it in the address", hash_() == "#folder=wyoming-and-tetons",
-          hash_())
+    check("opening a folder puts it in the address", q_() == "?folder=wyoming-and-tetons",
+          q_())
     L.click(".psc-card:not(.psc-hidden) img"); L.wait_for_timeout(300)
-    check("and opening a photograph does too", hash_().startswith("#photo="), hash_())
+    check("and opening a photograph does too", q_().startswith("?photo="), q_())
     L.go_back(); L.wait_for_timeout(300)
-    check("Back closes the overlay", not lb_open() and hash_() == "#folder=wyoming-and-tetons",
-          hash_())
+    check("Back closes the overlay", not lb_open() and q_() == "?folder=wyoming-and-tetons",
+          q_())
     L.go_back(); L.wait_for_timeout(300)
     check("and Back again returns to the index",
-          lvis(".psc-fold") == 5 and hash_() == "", hash_())
+          lvis(".psc-fold") == 5 and q_() == "", q_())
     L.go_forward(); L.wait_for_timeout(300)
     check("Forward reopens the folder", L.inner_text(".psc-crumb h3") == "Wyoming and Tetons")
     L.click(".psc-back"); L.wait_for_timeout(300)
-    check("the back button agrees with Back", lvis(".psc-fold") == 5 and hash_() == "", hash_())
+    check("the back button agrees with Back", lvis(".psc-fold") == 5 and q_() == "", q_())
 
     print("\n--- links that lead nowhere ---")
-    for bad, what in (("#photo=deadbeefdeadbeef", "a photograph since hidden"),
-                      ("#folder=a-folder-since-renamed", "a folder since renamed"),
-                      ("#folder=__proto__", "a prototype name"),
-                      ("#folder=constructor", "another one"),
-                      ("#photo=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E", "markup")):
+    for bad, what in (("?photo=deadbeefdeadbeef", "a photograph since hidden"),
+                      ("?folder=a-folder-since-renamed", "a folder since renamed"),
+                      ("?folder=__proto__", "a prototype name"),
+                      ("?folder=constructor", "another one"),
+                      ("?photo=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E", "markup"),
+                      ("#photo=deadbeefdeadbeef", "an old link to something gone")):
         L.goto(base + bad); L.wait_for_timeout(500)
         check(f"{what}: lands on the index with a note, not an error",
               lvis(".psc-fold") == 5 and "no longer in this gallery" in L.inner_text(".psc-toast"),
               L.inner_text(".psc-toast"))
-        check(f"{what}: and the dead link is cleared from the address", hash_() == "", hash_())
+        check(f"{what}: and the dead link is cleared from the address",
+              q_() == "" and hash_() == "", q_() + hash_())
     L.goto(base + "#/portal/signup"); L.wait_for_timeout(500)
     check("a hash that is not ours - Ghost's own portal - is left alone",
           hash_() == "#/portal/signup" and lvis(".psc-fold") == 5, hash_())
@@ -678,7 +801,7 @@ with sync_playwright() as pw:
     print("\n--- a link wins over the remembered view, without replacing it ---")
     L.goto(base); L.wait_for_timeout(300)
     L.click(".psc-vall"); L.wait_for_timeout(300)
-    L.goto(base + "#folder=bonneville"); L.wait_for_timeout(500)
+    L.goto(base + "?folder=bonneville"); L.wait_for_timeout(500)
     check("a folder link opens the folder even for an All photos visitor",
           L.inner_text(".psc-crumb h3") == "Bonneville")
     L.goto(base); L.wait_for_timeout(500)
@@ -693,13 +816,18 @@ with sync_playwright() as pw:
         window.__shared = d; return Promise.resolve(); };""")
     M = mctx.new_page()
     M.on("pageerror", lambda e: errors.append(str(e)))
-    M.goto(base + "#photo=" + target["id"]); M.wait_for_timeout(500)
-    check("on a phone the button says Share",
-          M.inner_text(".psc-link-lb").strip() == "Share", M.inner_text(".psc-link-lb"))
+    M.goto(base + "?photo=" + target["id"]); M.wait_for_timeout(500)
+    check("on a phone the overlay's button says Share",
+          M.inner_text(".psc-link-lb").strip() == "Share",
+          M.inner_text(".psc-link-lb"))
     M.click(".psc-link-lb"); M.wait_for_timeout(200)
     shared = M.evaluate("window.__shared") or {}
     check("and hands the link to the share sheet",
-          (shared.get("url") or "").endswith("#photo=" + target["id"]), str(shared))
+          (shared.get("url") or "").endswith("?photo=" + target["id"]), str(shared))
+    M.keyboard.press("Escape"); M.wait_for_timeout(300)
+    check("and the folder's says Share gallery",
+          M.inner_text(".psc-crumb .psc-link").strip() == "Share gallery",
+          M.inner_text(".psc-crumb .psc-link"))
     mctx.close()
 
     check("no page errors anywhere", not errors, "; ".join(errors[:3]))

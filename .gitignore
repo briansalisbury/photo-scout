@@ -38,6 +38,12 @@ _photo_scout/*
 # fed back in with --web-tags, not part of the project.
 psc-web-tags.json
 
+# ---- the optional link-preview Worker -----------------------------------
+# wrangler.toml carries your own domain and route; wrangler.toml.example, which
+# carries example.com, is what's tracked. .wrangler/ is its local state.
+worker/wrangler.toml
+.wrangler/
+
 # ---- operating system clutter -------------------------------------------
 *.tmp
 Thumbs.db

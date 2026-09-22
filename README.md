@@ -2,11 +2,11 @@
 
 ![The Photo Scout report: a shortlist of top picks and strong photographs, each card showing its rating, score, folder, capture date and resolution, and the reasons behind its score](docs/images/photo-scout-report.png)
 
-Photo Scout is an AI-powered photo **and video** analysis system that processes 
+Photo Scout is an AI-powered photo **and video** analysis system that runs 
 entirely on your own machine.
 
 Photo Scout creates a photo gallery of your highest-rated stills, based on 
-*technical quality, aesthetics, and configurable subject matter* preferences
+technical quality, aesthetics, and configurable subject matter preferences
 (for example: desert or night sky). It's intended as a quality and subject
 assessment and scoring application for a large photo or video library to 
 quickly narrow down top-rated stills. 
@@ -19,8 +19,9 @@ The report can also be uploaded as a photo gallery to any [Ghost CMS](https://gh
 implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
-- Brian Salisbury
-  Author, "AI Supervisor"
+I hope you discover beautiful new things to look at.
+
+- Brian Salisbury - Author, "AI Supervisor"
 
 Released under the **GNU General Public License v3.0 or later** — see
 [License](#14-license).
@@ -96,7 +97,7 @@ There is no model that knows which of your photographs is the good one. What exi
 are models that measure *components* of that judgment, and the script combines three
 of them.
 
-### Axis 1 — Aesthetic (default weight 60%)
+### Axis 1 — Aesthetic (weight 60%)
 
 **LAION-Aesthetic V2.** A small neural network trained on hundreds of thousands of
 human ratings of "how beautiful is this image." It sits on top of CLIP: CLIP turns
@@ -105,7 +106,7 @@ head maps that summary to a score of roughly 1–10.
 
 This is the closest thing to a proxy for "would someone hang this on a wall."
 
-### Axis 2 — Technical (default weight 25%)
+### Axis 2 — Technical (weight 25%)
 
 **NIMA** (Neural Image Assessment, from Google Research), which was trained to
 predict technical photographic quality — exposure, noise, tonal handling —
@@ -119,7 +120,7 @@ Plus two cheap arithmetic checks that catch things NIMA is soft on:
 - **Clipping**: what fraction of pixels are pure white or pure black. Blown
   highlights are the single most common reason a landscape can't be printed large.
 
-### Axis 3 — Subject match (default weight 15%)
+### Axis 3 — Subject match (weight 15%)
 
 This is the part you tune to *your own subject matter*, and it's why the script does
 something beyond generic aesthetic scoring.
@@ -1178,22 +1179,22 @@ at its edges, and the sort box drops its Folder A–Z and Folder Z–A options,
 which sort nothing when every photograph shares the folder. `--view all` publishes a page that opens flat instead.
 
 Every folder and photograph has its own link. The page's address follows what
-is open — `…/photos/#folder=arches-national-park` for a folder,
-`…/photos/#photo=3f9c1d84b0e77265` for a photograph, which opens inside its
+is open — `…/photos/?folder=arches-national-park` for a folder,
+`…/photos/?photo=3f9c1d84b0e77265` for a photograph, which opens inside its
 folder so the arrows walk the rest of that shoot. **Copy link** in a folder's
 header and in the lightbox puts that address on the clipboard; on a phone the
 button reads **Share** and opens the system share sheet instead. Opening things
 adds history entries, so a phone's Back button closes the lightbox or returns
-to the index rather than leaving the page. Nothing here involves Ghost: the
-part after the `#` never leaves the browser.
+to the index rather than leaving the page. Any other query the visitor arrived
+with — a referral tag, a campaign parameter — is carried along rather than
+dropped. Earlier versions of the gallery used `#folder=` and `#photo=`; those
+links still open the right thing and are rewritten to the new form on arrival.
 
 Links survive republishing and rescoring. A photograph's link is derived from
 its path inside your library, and a folder's from its name, so renaming or
 moving either breaks links to it — the same rule hearts already follow, since
 they are keyed the same way. A dead link lands on the index with a note saying
-so. One limitation is structural: a link preview in a chat app is built from
-the page itself, and the `#` part never reaches the server that builds it, so
-every link previews as the gallery page rather than as the photograph.
+so.
 
 A folder's photographs are built into the page when you open that folder, not
 when the page loads, and the filters run on the published data rather than on
@@ -1202,6 +1203,51 @@ nobody has opened. The index therefore costs about the same whatever the library
 holds: ten thousand photographs open in roughly nine thousand elements instead of
 a hundred and seventy thousand. **All photos** is the one view that does build
 everything, which is what you asked it for.
+
+### Link previews
+
+Paste a link into Messages, Slack or Facebook and the app fetches the address
+with a robot of its own, reads a few `og:` tags out of the HTML and draws a
+card. The robot runs no JavaScript, so a shared photograph previews as the
+gallery page rather than as the photograph — the page only decides what to show
+once it is running in a browser, which is far too late.
+
+`worker/` holds an optional [Cloudflare Worker](https://workers.cloudflare.com/)
+that fixes this for sites behind Cloudflare. It sits in front of the one page
+your gallery lives on, reads the photograph list the page already carries, and
+writes the right tags into the response: a photograph link previews as that
+photograph, a folder link as that folder's highest-scoring frame with a count
+underneath. Nothing is generated, uploaded or registered, so nothing can fall
+out of step — republish the gallery and the previews follow.
+
+It is optional and separate. The gallery works exactly as before without it,
+and none of the scoring or publishing scripts know it exists. Ordinary visits
+are passed straight through: a request with no `?photo=` or `?folder=` never
+reaches the preview code at all, and any failure falls back to serving the page
+unchanged. `worker/README.md` has the setup, which is a few minutes of work in
+the Cloudflare dashboard, and `worker/wrangler.toml.example` is a starting
+configuration. On the free plan the traffic this sees — link previews only —
+costs nothing.
+
+### Accessibility
+
+Both pages — the local report and the published gallery — are built to meet
+**WCAG 2.2 Level AA**, and `tests/_selftest_a11y.py` measures it in a real
+browser on every run rather than checking that the attributes are present.
+
+What that means in practice: every thumbnail, folder tile and arrow is a real
+button, so the whole gallery works from the keyboard; opening a folder or a
+photograph moves focus to where you would want it and closing gives it back;
+the overlay is a modal dialog that Tab cannot walk out of and Escape closes;
+every control has a name a screen reader can read; filter counts and messages
+are announced; text meets the contrast floor and pointer targets are at least
+24 pixels; and the page reflows to 320 pixels without scrolling sideways.
+
+One judgement call is left as it is. The buttons carry a quiet 1px border that
+does not by itself meet the 3:1 figure for a non-text boundary. Each one is
+identified by its label, which does clear the text threshold comfortably, and
+raising every border would change the look of the page substantially. If you
+would rather have it, the border colours are in one block of the stylesheet.
 
 ### Fitting the gallery to your theme
 
@@ -1212,6 +1258,7 @@ inherits whatever spacing your theme gives its content. Three flags adjust the f
 |---|---|
 | `--title "Best of 2011"` | Heading above the gallery. **Blank by default**, which also collapses the theme's heading band so the photographs start at the top of the page |
 | `--title-size compact` | What to do with your theme's own heading band. `compact` trims its padding and brings the title down to a sensible size; `keep` leaves the theme untouched; `hide` removes the heading entirely. Defaults to `hide` when `--title` is blank, `compact` otherwise |
+| `--description "…"` | What a link to the gallery says underneath its title in a chat app, a social card or a search result. A sensible generic line by default; `--description ""` leaves whatever you have written in Ghost admin. Folder and photograph links are answered separately — see [Link previews](#link-previews) |
 | `--gap 8` | Space above and below the gallery (default 8). Themes often set a large margin here — Ghost's own default is `max(12vmin, 64px)`, which is a visible hole on a tall screen. This replaces it. Negative values tuck the gallery up closer |
 | `--max-width 1800` | How wide the grid may grow, in pixels |
 | `--column-width 260` | Minimum column width; smaller means more columns |
@@ -1399,7 +1446,7 @@ Full detail — ground rules, how to run the tests, style — is in
 anything inside `--root`. This is the one rule with no exceptions, and
 `tests/_selftest_readonly.py` exists to prove it.
 
-**Prove it, don't assert it.** Sixteen suites live in `tests/`; run them with
+**Prove it, don't assert it.** Nineteen suites live in `tests/`; run them with
 `for t in tests/_selftest*.py; do python "$t"; done`. Several real bugs here were
 caught only because a test drove an actual browser rather than inspecting the
 generated HTML. When you fix something, add the test that would have caught it, and
