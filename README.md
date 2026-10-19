@@ -19,6 +19,8 @@ The report can also be uploaded as a photo gallery to any [Ghost CMS](https://gh
 implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
+I hope it's a functional and fun utility to help cull your personal or professional media collection, but always trust your eye. ;-)
+
 - Brian Salisbury
   Author, "AI Supervisor"
 
@@ -639,6 +641,8 @@ script renders from the RAW while scoring, stored in the output directory's `pre
 |---|---|
 | click thumbnail, or **view** | open the lightbox |
 | `←` `→` or the side arrows | previous / next photo |
+| `P` or **▶ Play** | start or stop a slideshow from here |
+| **8s** | seconds per photograph: each press steps 4 → 8 → 15 → 30 |
 | `F` or **Full screen** | true full screen |
 | `Z`, **1:1**, or click the image | toggle fit-to-window and actual pixels |
 | `Esc`, **×**, or click the backdrop | close |
@@ -651,6 +655,24 @@ and previous images preload, so paging is instant.
 
 The counter in the top-left reads `4/57` — position within whatever is currently
 filtered.
+
+**The slideshow** is the same overlay on a clock. **▶ Play** — or `P` — advances
+through whatever the arrows would have walked, in the order they would have
+walked it, looping at the end. It moves on every eight seconds unless you choose
+otherwise: the button beside Play shows the current pace and each press steps
+it to 4, 8, 15 or 30 seconds — a quick pass over a shortlist at one end, a
+screen left running at the other. Your choice is remembered in that browser, and
+changing it mid-slideshow gives the photograph on screen the new interval from
+that moment. It starts from the photograph you
+opened rather than from the top, so where it begins is your choice. After a few
+still seconds everything but the photograph fades out, including the cursor, and
+the first movement, tap or keypress brings it all back; on a touchscreen the
+first tap reveals the controls rather than closing the overlay. Pause and
+everything stays put. Stepping by hand while it plays gives the new photograph a
+full interval rather than the remainder of the last one, a backgrounded tab
+holds its place instead of running through the folder unseen, and the screen is
+kept awake while it runs. Photographs cross-fade unless the system has been
+asked for reduced motion, in which case they cut.
 
 **On opening the RAW itself:** the **open folder** link is a plain `file:///` link,
 which in most browsers shows the folder's contents. Browsers deliberately refuse to
@@ -1177,6 +1199,13 @@ best night frame. Inside a folder the lightbox walks that folder only and stops
 at its edges, and the sort box drops its Folder A–Z and Folder Z–A options,
 which sort nothing when every photograph shares the folder. `--view all` publishes a page that opens flat instead.
 
+The published gallery has the same slideshow: open a photograph and press
+**▶** beside the counter, or `P`, with the same speed button next to it. It runs through whatever the arrows would
+have walked — so inside a folder it plays that folder, and in **All photos** it
+plays everything the current filter leaves — and the controls fade away while
+it does. There is deliberately no Play button on the index or in the toolbar: a
+slideshow starts from a photograph you chose.
+
 Every folder and photograph has its own link. The page's address follows what
 is open — `…/photos/?folder=arches-national-park` for a folder,
 `…/photos/?photo=3f9c1d84b0e77265` for a photograph, which opens inside its
@@ -1242,11 +1271,11 @@ every control has a name a screen reader can read; filter counts and messages
 are announced; text meets the contrast floor and pointer targets are at least
 24 pixels; and the page reflows to 320 pixels without scrolling sideways.
 
-One judgement call is left as it is. The buttons carry a quiet 1px border that
+One judgment call is left as it is. The buttons carry a quiet 1px border that
 does not by itself meet the 3:1 figure for a non-text boundary. Each one is
 identified by its label, which does clear the text threshold comfortably, and
 raising every border would change the look of the page substantially. If you
-would rather have it, the border colours are in one block of the stylesheet.
+would rather have it, the border colors are in one block of the stylesheet.
 
 ### Fitting the gallery to your theme
 
@@ -1445,7 +1474,7 @@ Full detail — ground rules, how to run the tests, style — is in
 anything inside `--root`. This is the one rule with no exceptions, and
 `tests/_selftest_readonly.py` exists to prove it.
 
-**Prove it, don't assert it.** Nineteen suites live in `tests/`; run them with
+**Prove it, don't assert it.** Twenty suites live in `tests/`; run them with
 `for t in tests/_selftest*.py; do python "$t"; done`. Several real bugs here were
 caught only because a test drove an actual browser rather than inspecting the
 generated HTML. When you fix something, add the test that would have caught it, and

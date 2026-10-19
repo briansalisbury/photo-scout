@@ -99,7 +99,7 @@ for attr in ("data-path", "data-name", "data-note", "data-score",
 print("\n=== handlers and keys ===")
 for frag in ("ArrowRight", "ArrowLeft", "Escape", "requestFullscreen",
              "toggleZoom", "navigator.clipboard", "new Image().src"):
-    check(f"handler/behaviour: {frag}", frag in h)
+    check(f"handler/behavior: {frag}", frag in h)
 check("filter and lightbox share the visible() list", "visible()" in h)
 check("zoom class toggling defined", "'actual'" in h and "#lb-stage.actual" in h)
 

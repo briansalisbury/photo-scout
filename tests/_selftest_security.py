@@ -249,7 +249,7 @@ for good in ("#b09468", "#b96", "b09468", "  #B09468  "):
 # Whatever comes out is rebuilt from parsed numbers, never from the input text.
 for value in ("#b09468", "#000", "#2e6f4f"):
     pal = ps.folder_palette(value)
-    check(f"{value}: both colours are plain hex",
+    check(f"{value}: both colors are plain hex",
           all(re.fullmatch(r"#[0-9a-f]{6}", v) for v in pal.values()), str(pal))
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
@@ -257,7 +257,7 @@ with contextlib.redirect_stdout(buf):
                   "--folder-outline", "red;}body{display:none}.x{"])
 check("and the script stops rather than writing it", rc == 2, f"rc={rc}")
 check("with a sentence, not a traceback",
-      "is not a colour" in buf.getvalue() and "Traceback" not in buf.getvalue(),
+      "is not a color" in buf.getvalue() and "Traceback" not in buf.getvalue(),
       buf.getvalue()[:160])
 
 

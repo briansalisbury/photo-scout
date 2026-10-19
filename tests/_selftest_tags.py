@@ -130,11 +130,11 @@ check("tag keys are the database paths",
 
 print("\n=== browser-side machinery is present and consistent ===")
 for frag, why in [
-    ("function cleanTag", "sanitiser mirrored in JS"),
+    ("function cleanTag", "sanitizer mirrored in JS"),
     ("[^A-Za-z0-9 _-]", "same character rule as Python"),
-    ("function tagHue", "deterministic colour"),
+    ("function tagHue", "deterministic color"),
     ("137.508", "golden-angle hue spacing"),
-    ("function paintTag", "colour applied to chips"),
+    ("function paintTag", "color applied to chips"),
     ("createTextNode(name)", "tags rendered as text, never innerHTML"),
     ("localStorage.setItem(STORE_KEY", "persisted to localStorage"),
     ("beforeunload", "warns about unsaved tags"),
@@ -171,7 +171,7 @@ check("free text also searches tags", "cardTags.includes(query)" in h)
 check("no stray control characters in the report",
       not any(ord(c) < 9 or 13 < ord(c) < 32 for c in h))
 
-print("\n=== the JS and Python sanitisers agree (executed, not assumed) ===")
+print("\n=== the JS and Python sanitizers agree (executed, not assumed) ===")
 import subprocess, shutil as _sh
 if not _sh.which("node"):
     print("SKIP  node not available")

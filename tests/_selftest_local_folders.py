@@ -105,7 +105,7 @@ check("every card carries the gallery it belongs to",
       CARDS.count("data-group=") == TOTAL, str(CARDS.count("data-group=")))
 check("and the thumbnail the tile needs before the card exists",
       CARDS.count("data-thumb=") == TOTAL, str(CARDS.count("data-thumb=")))
-check("the outline colour was resolved, not left as a placeholder",
+check("the outline color was resolved, not left as a placeholder",
       "__FOLDLINE__" not in h and ps.DEFAULT_FOLDER_OUTLINE in h)
 check("a subfolder merges into its parent",
       ps.folder_group("2010-03-12 - Arches National Park/Publish")
@@ -302,11 +302,11 @@ with sync_playwright() as pw:
           f"{P3.eval_on_selector_all('.fold', 'e => e.length')} tiles, "
           f"{P3.eval_on_selector_all('.card', 'e => e.length')} cards")
 
-    print("\n--- the colours tell the controls apart")
+    print("\n--- the colors tell the controls apart")
     P3.click("#views button[data-view='all']"); P3.wait_for_timeout(300)
     def bg(sel):
         return P3.eval_on_selector(sel, "e => getComputedStyle(e).backgroundColor")
-    check("the active view and the active band are different colours",
+    check("the active view and the active band are different colors",
           bg("#views button.on") != bg("button[data-f].on"),
           f"{bg('#views button.on')} vs {bg('button[data-f].on')}")
 

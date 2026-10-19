@@ -2531,7 +2531,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     and give a touchscreen a way to do it at all. */
  #zoom { display:inline-flex; gap:4px; }
  #zoom button { min-width:34px; padding:6px 9px; font-size:15px; line-height:1; }
- #zoom button[disabled] { opacity:.35; cursor:default; }
+ /* Dimmer than an enabled button, but still readable: at .35 the label was
+    2.8:1 and read as missing rather than unavailable. */
+ #zoom button[disabled] { opacity:.55; cursor:default; }
  .card { background:#1b1b1b; border:1px solid #2c2c2c; border-radius:10px; overflow:hidden;
    display:flex; flex-direction:column; }
  .card img { width:100%; aspect-ratio:3/2; object-fit:cover; background:#000; display:block; }
@@ -2583,7 +2585,9 @@ HTML_TEMPLATE = r"""<!doctype html>
    color:#e8e8e8; border-radius:6px; padding:4px 7px; font-size:11.5px;
    min-height:24px; }
  .taginput:focus { border-color:#5a5a5a; border-style:solid; }
- .taginput::placeholder { color:#6a6a6a; }
+ /* A placeholder is text too: #6a6a6a was 3.4:1 on the field. The muted gray
+    used elsewhere on the page clears 4.5:1 on every field background. */
+ input::placeholder { color:#9a9a9a; opacity:1; }
 
  /* ---- tag search box ---------------------------------------------------- */
  #searchbox { position:relative; flex:1; min-width:260px; display:flex;
@@ -2654,6 +2658,8 @@ HTML_TEMPLATE = r"""<!doctype html>
    border-radius:6px; padding:6px 11px; font-size:13px; cursor:pointer;
    text-decoration:none; white-space:nowrap; }
  #lb-bar button:hover, #lb-bar a:hover { background:#2f2f2f; }
+ /* Wide enough for "30s", so stepping the speed does not shuffle the bar. */
+ #lb-speed { min-width:46px; font-variant-numeric:tabular-nums; }
  #lb-stage { flex:1; position:relative; overflow:auto; display:flex;
    align-items:center; justify-content:center; background:#0b0b0b; }
  #lb-img { display:block; max-width:100%; max-height:100%; object-fit:contain;
@@ -2669,6 +2675,21 @@ HTML_TEMPLATE = r"""<!doctype html>
    font-family:inherit; font-size:26px; line-height:1; padding:14px 18px;
    border-radius:10px; cursor:pointer; user-select:none; z-index:2; }
  .lb-nav:hover { background:rgba(45,45,45,.92); }
+ /* The outgoing photograph, held on top of the new one for the length of a
+    cross-fade. Absolutely positioned, so it keeps its own shape on the way out
+    rather than being resized to the shape of the one arriving. */
+ #lb-fade { position:absolute; inset:0; margin:auto; max-width:100%;
+   max-height:100%; object-fit:contain; z-index:1; opacity:0;
+   pointer-events:none; transition:opacity .45s; }
+ /* While a slideshow runs, everything but the photograph gets out of the way
+    after a few still seconds, and returns on the first movement, tap or key.
+    Focus keeps it up: the keyboard must never land on something invisible. */
+ #lb-bar, .lb-nav, #lb-note { transition:opacity .35s; }
+ #lb.idle { cursor:none; }
+ #lb.idle #lb-bar, #lb.idle .lb-nav, #lb.idle #lb-note { opacity:0; pointer-events:none; }
+ #lb.idle:has(:focus-visible) #lb-bar, #lb.idle:has(:focus-visible) .lb-nav,
+ #lb.idle:has(:focus-visible) #lb-note { opacity:1; pointer-events:auto; }
+ @media (prefers-reduced-motion:reduce) { #lb-fade { transition:none; } }
  #lb-prev { left:14px; } #lb-next { right:14px; }
  #lb-missing { color:#f0b0b0; font-size:14px; padding:40px; text-align:center;
    display:none; }
@@ -2881,6 +2902,10 @@ HTML_TEMPLATE = r"""<!doctype html>
     <span id="lb-dims"></span>
     <button id="lb-zoom" title="Toggle 1:1 (Z)">1:1</button>
     <button id="lb-full" title="Full screen (F)">Full screen</button>
+    <button id="lb-play" type="button" aria-pressed="false" aria-label="Play slideshow"
+            title="Play slideshow (P)">&#9654; Play</button>
+    <button id="lb-speed" type="button" aria-label="Slideshow speed: 8 seconds per photo"
+            title="Seconds per photo - press to change">8s</button>
     <a id="lb-folder" href="#">open folder</a>
     <button id="lb-copy" title="Copy the full path">copy path</button>
   </div>
@@ -3805,16 +3830,147 @@ __CARDS__
    stage.classList.remove('actual');
    stage.scrollTop = stage.scrollLeft = 0;
    lb.classList.add('open');
+   if (playing()) armSlide();
    if (!wasOpen) focusSoon(document.getElementById('lb-close'));
    // Warm the neighbors so arrow-key paging feels instant.
    [list[(idx + 1) % list.length], list[(idx - 1 + list.length) % list.length]]
      .forEach(n => { if (n && n.dataset.preview) new Image().src = n.dataset.preview; });
  }
+ // ---- slideshow -----------------------------------------------------------
+ // The overlay already walks a list of photographs; a slideshow is that list on
+ // a timer. Kept deliberately in step with the published gallery's version, so
+ // the two behave the same way.
+ // A quick run through a shortlist, comfortable viewing, and two for leaving
+ // it running on a screen. The speed button steps through them in order.
+ const SLIDE_PRESETS = [4000, 8000, 15000, 30000];
+ let SLIDE_MS = 8000;              // the default, until you pick another
+ const IDLE_MS = 2500;             // stillness before the controls fade
+ const SPEED_KEY = 'psc-slide-ms';
+ // Your choice is remembered in this browser. Only a value that is still one of
+ // the presets is honored, so a changed list cannot strand anybody.
+ try {
+   const savedMs = parseInt(localStorage.getItem(SPEED_KEY), 10);
+   if (SLIDE_PRESETS.includes(savedMs)) SLIDE_MS = savedMs;
+ } catch (e) {}
+ const playBtn = document.getElementById('lb-play');
+ const speedBtn = document.getElementById('lb-speed');
+ let slideTimer = null, idleTimer = null, wakeLock = null;
+ const fadeImg = document.createElement('img');
+ fadeImg.id = 'lb-fade'; fadeImg.alt = '';
+ stage.appendChild(fadeImg);
+ const calm = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)');
+
+ const playing = () => !!slideTimer;
+
+ function crossFade(advance) {
+   if ((calm && calm.matches) || !lbImg.src) { advance(); return; }
+   fadeImg.src = lbImg.src;
+   fadeImg.style.transition = 'none';
+   fadeImg.style.opacity = '1';
+   advance();
+   requestAnimationFrame(() => requestAnimationFrame(() => {
+     fadeImg.style.transition = '';
+     fadeImg.style.opacity = '0';
+   }));
+ }
+
+ // Each tick re-arms its own successor rather than repeating on an interval,
+ // so a slow photograph cannot stack ticks up behind it. show() re-arms too,
+ // which is what gives a photograph reached by hand its full turn.
+ function armSlide() {
+   clearTimeout(slideTimer);
+   slideTimer = setTimeout(() => crossFade(() => show(idx + 1)), SLIDE_MS);
+ }
+
+ function wake() {
+   lb.classList.remove('idle');
+   clearTimeout(idleTimer);
+   if (playing()) idleTimer = setTimeout(() => lb.classList.add('idle'), IDLE_MS);
+ }
+
+ // The screen sleeping halfway through is the one failure a slideshow cannot
+ // recover from. Silently unsupported where it is unsupported.
+ function holdScreen(on) {
+   try {
+     if (on && navigator.wakeLock && !wakeLock)
+       navigator.wakeLock.request('screen').then(l => { wakeLock = l; }, () => {});
+     else if (!on && wakeLock) { wakeLock.release(); wakeLock = null; }
+   } catch (e) {}
+ }
+
+ function syncPlay() {
+   if (!playBtn) return;
+   const on = playing();
+   playBtn.innerHTML = on ? '&#10074;&#10074; Pause' : '&#9654; Play';
+   playBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+   playBtn.setAttribute('aria-label', on ? 'Pause slideshow' : 'Play slideshow');
+   playBtn.title = (on ? 'Pause slideshow' : 'Play slideshow') + ' (P)';
+ }
+
+ function startSlide() {
+   if (playing() || visible().length < 2) return;
+   armSlide(); holdScreen(true); syncPlay(); wake();
+ }
+ function stopSlide() {
+   clearTimeout(slideTimer); slideTimer = null;
+   clearTimeout(idleTimer); idleTimer = null;
+   lb.classList.remove('idle');
+   holdScreen(false); syncPlay();
+ }
+ const toggleSlide = () => playing() ? stopSlide() : startSlide();
+
+ if (playBtn) playBtn.addEventListener('click', ev => { ev.stopPropagation(); toggleSlide(); });
+
+ const seconds = ms => Math.round(ms / 100) / 10;
+ function syncSpeed() {
+   if (!speedBtn) return;
+   const s = seconds(SLIDE_MS);
+   speedBtn.textContent = s + 's';
+   speedBtn.setAttribute('aria-label',
+     'Slideshow speed: ' + s + (s === 1 ? ' second' : ' seconds') + ' per photo');
+ }
+ // The next preset along, wrapping back to the fastest. Mid-slideshow the
+ // photograph on screen starts its new, full interval from now.
+ if (speedBtn) speedBtn.addEventListener('click', ev => {
+   ev.stopPropagation();
+   const at = SLIDE_PRESETS.indexOf(SLIDE_MS);
+   SLIDE_MS = SLIDE_PRESETS[(at + 1) % SLIDE_PRESETS.length];
+   try { localStorage.setItem(SPEED_KEY, String(SLIDE_MS)); } catch (e) {}
+   syncSpeed();
+   if (playing()) armSlide();
+ });
+ syncSpeed();
+
+ // Anything from the visitor brings the controls back, and restarts the
+ // countdown to their leaving again.
+ // Pointer events cover touch as well, so there is no separate touch listener.
+ ['pointermove', 'keydown', 'focusin']
+   .forEach(ev => lb.addEventListener(ev, wake, { passive: true }));
+ // Whether the controls were still hidden when the press landed. This matters
+ // on a touchscreen and only there: a mouse wakes them on the way to the click,
+ // so by then a click on the backdrop means what it always meant. A finger
+ // cannot hover first, so its first tap brings the controls back instead.
+ let pressedHidden = false;
+ lb.addEventListener('pointerdown', () => {
+   pressedHidden = playing() && lb.classList.contains('idle');
+   wake();
+ }, { passive: true });
+
+ // A slideshow left in a background tab would run through a whole folder
+ // unseen, so it holds its place instead.
+ document.addEventListener('visibilitychange', () => {
+   if (!lb.classList.contains('open') || !playing()) return;
+   if (document.hidden) clearTimeout(slideTimer);
+   else { armSlide(); holdScreen(true); }
+ });
+
  function close() {
    // Leave the page on the photograph being looked at, not the one that was
    // clicked several arrow presses ago.
    const list = visible();
    const c = idx >= 0 ? list[idx] : null;
+   stopSlide();
+   fadeImg.src = ''; fadeImg.style.opacity = '0';
    lb.classList.remove('open');
    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
    if (c) c.scrollIntoView({ block: 'center' });
@@ -3906,7 +4062,13 @@ __CARDS__
    try { await navigator.clipboard.writeText(p); toast('Path copied to clipboard'); }
    catch { window.prompt('Copy this path:', p); }
  };
- stage.addEventListener('click', ev => { if (ev.target === stage) close(); });
+ stage.addEventListener('click', ev => {
+   if (ev.target !== stage) return;
+   // Mid-slideshow, with the controls faded out, a click is far more likely to
+   // mean "show me the buttons" than "close this".
+   if (pressedHidden) { pressedHidden = false; return; }
+   close();
+ });
 
  document.addEventListener('keydown', ev => {
    if (!lb.classList.contains('open')) return;
@@ -3915,6 +4077,7 @@ __CARDS__
    else if (ev.key === 'ArrowLeft') { ev.preventDefault(); show(idx - 1); }
    else if (ev.key === 'f' || ev.key === 'F') { toggleFull(); }
    else if (ev.key === 'z' || ev.key === 'Z') { toggleZoom(); }
+   else if (ev.key === 'p' || ev.key === 'P') { ev.preventDefault(); toggleSlide(); }
  });
 </script>
 """
@@ -3976,7 +4139,7 @@ def _hex_rgb(value: str) -> tuple[float, float, float]:
     if len(v) == 3:
         v = "".join(c * 2 for c in v)
     if len(v) != 6 or any(c not in "0123456789abcdefABCDEF" for c in v):
-        raise ValueError(f"{value!r} is not a colour like #b09468")
+        raise ValueError(f"{value!r} is not a color like #b09468")
     return tuple(int(v[i:i + 2], 16) / 255 for i in (0, 2, 4))
 
 
@@ -4029,7 +4192,7 @@ def folder_palette(outline_hex: str) -> dict:
 
     line = _rgb_hex(rgb)
     # Walk toward the light until the border is actually visible. Hue and
-    # saturation are left alone, so a lifted color is recognisably the one
+    # saturation are left alone, so a lifted color is recognizably the one
     # that was asked for.
     while contrast(_hex_rgb(line), card) < OUTLINE_MIN_CONTRAST and light < 0.99:
         light = min(0.99, light + 0.01)
@@ -4503,7 +4666,7 @@ def run_reset(root: Path, out_dir: Path, assume_yes: bool) -> bool:
         except EOFError:
             answer = ""
         if answer != "yes":
-            log("Cancelled - nothing was deleted.")
+            log("Canceled - nothing was deleted.")
             return False
 
     _sh.rmtree(out_dir)
@@ -4557,8 +4720,8 @@ def main(argv=None) -> int:
                          "you pick in the report itself is remembered after that")
     ap.add_argument("--folder-outline", default=DEFAULT_FOLDER_OUTLINE,
                     metavar="HEX",
-                    help=f"Outline colour of the folder tiles, a hex value like "
-                         f"{DEFAULT_FOLDER_OUTLINE} (the default). A colour too "
+                    help=f"Outline color of the folder tiles, a hex value like "
+                         f"{DEFAULT_FOLDER_OUTLINE} (the default). A color too "
                          f"dark to see against the card is lifted until it is")
     ap.add_argument("--min-edge", type=int, default=MIN_IMAGE_EDGE, metavar="PX",
                     help=f"Ignore any image or clip whose shorter side is under PX "
@@ -4583,7 +4746,7 @@ def main(argv=None) -> int:
     # through: folder_palette rebuilds the string from parsed numbers, so a
     # value carrying CSS of its own cannot survive the trip.
     if not outline_ok(args.folder_outline):
-        log(f"ERROR: --folder-outline {args.folder_outline!r} is not a colour.")
+        log(f"ERROR: --folder-outline {args.folder_outline!r} is not a color.")
         log("       Wanted a hex value like #b09468 or #b96, and nothing else.")
         return 2
 

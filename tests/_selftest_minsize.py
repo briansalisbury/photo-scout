@@ -72,7 +72,7 @@ check("a corrupt file reports unknown rather than raising",
       ps.read_dimensions(TMP / "broken.jpg") is None)
 
 
-print("\n=== why the scoring canvas is normalised ===")
+print("\n=== why the scoring canvas is normalized ===")
 # The failure mode, demonstrated rather than asserted. Laplacian variance is a
 # sum over pixels of local contrast: feed it more pixels of the same scene and
 # the number climbs, so an unnormalised metric reports "sharper" when it means
@@ -95,7 +95,7 @@ check("measured at native size the same photograph looks very different",
 
 big_n = ps.sharpness_variance(base)
 small_n = ps.sharpness_variance(base.resize((600, 400), Image.LANCZOS))
-check("sharpness_variance normalises that away",
+check("sharpness_variance normalizes that away",
       abs(big_n - small_n) <= 0.35 * max(big_n, small_n),
       f"2400px={big_n:.0f}  600px={small_n:.0f}")
 

@@ -35,7 +35,7 @@ export function slugify(name) {
   return s || encodeURIComponent(String(name).toLowerCase());
 }
 
-// Encoding normalised, so a link survives a chat app rewriting it.
+// Encoding normalized, so a link survives a chat app rewriting it.
 export function linkKey(raw) {
   try {
     return encodeURIComponent(decodeURIComponent(raw)).toLowerCase();

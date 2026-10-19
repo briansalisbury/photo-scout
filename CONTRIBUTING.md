@@ -2,7 +2,7 @@
 
 Contributions are welcome: patches, documentation, and bug reports alike.
 
-Field reports are particularly valuable. Photo Scout is exercised by nineteen test
+Field reports are particularly valuable. Photo Scout is exercised by twenty test
 suites, but a test library is a model of a real one, and models have edges. RAW
 files from a camera the project has not met, a folder structure nobody anticipated,
 an archive an order of magnitude larger than the ones it was built against — those
@@ -100,6 +100,7 @@ for t in tests/_selftest*.py; do python "$t" >/dev/null 2>&1 \
 | `_selftest_local_folders.py` | The same index in the local report, built on demand as folders open |
 | `_selftest_worker.py` | The optional link-preview Worker, run under Node against real pages |
 | `_selftest_a11y.py` | WCAG 2.2 AA on both pages: names, roles, focus, contrast, target size |
+| `_selftest_slideshow.py` | The slideshow on both pages, including on a touchscreen |
 | `_selftest_security.py` | Script-block escaping, the plaintext-HTTP refusal, heart service limits |
 
 The browser suites are the slowest. They are also the ones that have caught the most.
@@ -146,6 +147,12 @@ Two rules for patches:
 **`photo_scout_strong_top.py` is generated, not written.** `_make_variant.py`
 derives it from `photo_scout.py` by targeted substitution. Edit the parent and
 re-run the generator; a hand-edit will be silently overwritten.
+
+**The slideshow runs at a patched speed under test.** `_selftest_slideshow.py`
+rewrites `SLIDE_MS`, `SLIDE_PRESETS` and `IDLE_MS` in the generated page before
+loading it, and asserts that it found all three. Rename any of them and the
+suite fails loudly rather than sitting through eight seconds a frame. The speed
+button's labels are checked on an unpatched copy, so they read the real presets.
 
 **A folder's link is spelled in two places.** The gallery spells it in
 `photo_scout_ghost.py`, and `worker/preview.js` spells it again to resolve a

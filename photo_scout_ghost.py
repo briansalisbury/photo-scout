@@ -138,6 +138,9 @@ UNTITLED_GHOST_TITLE = "Photo Scout Gallery"
 DEFAULT_DESCRIPTION = ("Browse this collection by folder, search it by name, date "
                        "or tag, and open any photograph full size.")
 UPLOAD_PREFIX = "psc"               # marks our uploads in Ghost's media library
+# Where a --dry-run writes its page when --emit-html names no file. Only a dry
+# run ever falls back to this: a real publish writes a local copy only on request.
+DRYRUN_HTML = "ghost_dryrun.html"
 
 # Only these verdicts are published.
 PUBLISH_VERDICTS = ("TOP PICK", "STRONG")
@@ -670,7 +673,25 @@ GALLERY_CSS = """
 .psc-wrap{--psc-bg:#111;--psc-fg:#e8e8e8;--psc-mut:#9a9a9a;--psc-card:#1b1b1b;--psc-line:#2c2c2c;
   --psc-colw:__COLW__px}
 .psc-wrap{background:var(--psc-bg);color:var(--psc-fg);padding:10px 16px;border-radius:12px;
-  font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box}
+  font:14px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;box-sizing:border-box;
+  color-scheme:dark}
+/* Form controls take their text color from the theme around the gallery, not
+   from it. Themes commonly set -webkit-text-fill-color on fields inside page
+   content, and in Safari and Chrome that property paints the text instead of
+   color - so a field could be given our light text color and still draw the
+   theme's dark gray on our dark box. currentColor hands the job back to color,
+   which is ours, including the colors the on-states use. !important for the
+   reason the margins above need it: the theme's selector is not knowable. */
+.psc-wrap button,.psc-wrap input,.psc-wrap select,.psc-wrap textarea,
+.psc-lb button,.psc-toast button{-webkit-text-fill-color:currentColor!important}
+/* The fields have no on-states, so their color is fixed outright. */
+.psc-wrap input,.psc-wrap select,.psc-wrap textarea{color:var(--psc-fg)!important;
+  caret-color:var(--psc-fg)}
+/* A placeholder is text too, and the browser default is too dim on a dark box
+   (3.4:1). The page's own muted gray clears 4.5:1 on every field background.
+   opacity:1 because Firefox otherwise halves it again. */
+.psc-wrap input::placeholder,.psc-wrap textarea::placeholder{
+  color:var(--psc-mut)!important;-webkit-text-fill-color:var(--psc-mut)!important;opacity:1}
 /* Themes space the children of their content area generously - Ghost's own
    default is max(12vmin,64px), which is a visible hole under a full-width embed
    on a tall screen. !important because those rules are usually more specific
@@ -710,7 +731,9 @@ GALLERY_CSS = """
 .psc-zoom{display:inline-flex;gap:4px}
 .psc-zoom button{min-width:34px;padding:6px 9px;font-size:15px;line-height:1;
   font-variant-numeric:tabular-nums}
-.psc-zoom button[disabled]{opacity:.35;cursor:default}
+/* Dimmer than an enabled button, but still readable: at .35 the label was
+   2.8:1 and read as missing rather than unavailable. */
+.psc-zoom button[disabled]{opacity:.55;cursor:default}
 .psc-foot{color:#858585;font-size:12px;text-align:center;padding:18px 0 4px}
 .psc-foot a{color:#9a9a9a;text-decoration:none;border-bottom:1px solid #3a3a3a}
 .psc-foot a:hover{color:var(--psc-fg);border-bottom-color:#6a6a6a}
@@ -837,9 +860,48 @@ __HEADCSS__
   display:flex;align-items:center;justify-content:center}
 .psc-nav:hover{background:rgba(0,0,0,.75)}
 .psc-prev{left:14px} .psc-next{right:14px}
-.psc-count-lb{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
-  color:#bbb;font-size:12.5px;background:rgba(0,0,0,.45);padding:4px 12px;border-radius:99px;
-  font-variant-numeric:tabular-nums;z-index:2}
+/* Play and the counter travel together at the foot of the overlay, so the
+   slideshow costs one control rather than a new row of them. */
+.psc-lbfoot{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);
+  display:flex;align-items:center;gap:8px;z-index:2}
+.psc-count-lb{color:#bbb;font-size:12.5px;background:rgba(0,0,0,.45);
+  padding:4px 12px;border-radius:99px;font-variant-numeric:tabular-nums}
+.psc-play{background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);
+  color:#eee;font-size:12px;line-height:1;width:34px;height:26px;border-radius:99px;
+  cursor:pointer;display:flex;align-items:center;justify-content:center}
+.psc-play:hover{background:rgba(0,0,0,.75)}
+/* The slideshow's speed, as a pill that steps through a few presets on each
+   press: one small control rather than a slider, which would fight the
+   sideways swipe that changes photographs. */
+.psc-speed{background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.18);
+  color:#eee;font-size:12px;line-height:1;min-width:40px;height:26px;padding:0 9px;
+  border-radius:99px;cursor:pointer;font-variant-numeric:tabular-nums}
+.psc-speed:hover{background:rgba(0,0,0,.75)}
+/* The outgoing photograph, held on top of the new one for the length of a
+   cross-fade. Absolutely positioned so it keeps its own shape while it goes,
+   rather than being resized to the shape of the one arriving. */
+.psc-lb .psc-fade{position:absolute;inset:0;margin:auto;z-index:1;opacity:0;
+  pointer-events:none;transition:opacity .45s}
+/* While a slideshow runs, everything but the photograph gets out of the way
+   after a few still seconds, and comes back on the first movement, tap or
+   key. Focus keeps it up: the keyboard must never land on something invisible. */
+.psc-lb .x,.psc-lb .psc-nav,.psc-lb .psc-cap,.psc-lb .psc-dims-lb,
+.psc-lb .psc-lbfoot,.psc-lb .psc-link-lb,.psc-lb .psc-hearts-lb{transition:opacity .35s}
+.psc-lb.psc-idle{cursor:none}
+.psc-lb.psc-idle .x,.psc-lb.psc-idle .psc-nav,.psc-lb.psc-idle .psc-cap,
+.psc-lb.psc-idle .psc-dims-lb,.psc-lb.psc-idle .psc-lbfoot,
+.psc-lb.psc-idle .psc-link-lb,.psc-lb.psc-idle .psc-hearts-lb{
+  opacity:0;pointer-events:none}
+.psc-lb.psc-idle:has(:focus-visible) .x,.psc-lb.psc-idle:has(:focus-visible) .psc-nav,
+.psc-lb.psc-idle:has(:focus-visible) .psc-cap,
+.psc-lb.psc-idle:has(:focus-visible) .psc-dims-lb,
+.psc-lb.psc-idle:has(:focus-visible) .psc-lbfoot,
+.psc-lb.psc-idle:has(:focus-visible) .psc-link-lb,
+.psc-lb.psc-idle:has(:focus-visible) .psc-hearts-lb{opacity:1;pointer-events:auto}
+/* Someone who has asked the system for less motion gets a plain cut. */
+@media (prefers-reduced-motion:reduce){
+  .psc-lb .psc-fade{transition:none}
+}
 .psc-cap{position:absolute;top:16px;left:20px;color:#ccc;font-size:12.5px;
   background:rgba(0,0,0,.45);padding:4px 12px;border-radius:99px;z-index:2;
   max-width:60vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -864,7 +926,11 @@ __HEADCSS__
 .psc-hearts-lb .psc-hcount{color:#ddd;font-size:13px;
   font-variant-numeric:tabular-nums}
 @media (max-width:600px){.psc-nav{width:44px;height:64px;font-size:22px}
-  .psc-prev{left:6px} .psc-next{right:6px} .psc-cap{max-width:50vw}}
+  .psc-prev{left:6px} .psc-next{right:6px} .psc-cap{max-width:50vw}
+  /* Hearts, Play, the speed, the counter and the link button do not fit on one
+     row of a phone: centered, the middle group ran into the link button. It
+     rides one row up instead, clear of both corners. */
+  .psc-lbfoot{bottom:56px}}
 
 /* iOS Safari zooms the entire page when a text field smaller than 16px takes
    focus, and there is no way to ask it not to without disabling pinch for the
@@ -2303,10 +2369,154 @@ GALLERY_JS = r"""
     if (!order.length) return;
     cur = (cur + d + order.length) % order.length;    // wraps at both ends
     show();
+    // A photograph stepped to by hand gets its full turn, not the remainder of
+    // the one before it.
+    if (playing()) armSlide();
     // Replaced rather than pushed: fifty photographs swiped through should not
     // take fifty presses of Back to leave.
     writeHash('photo', false);
   }
+
+  // ---- slideshow ----------------------------------------------------------
+  // The overlay already walks a list of photographs; a slideshow is that list
+  // on a timer, so this adds a clock and gets out of the way rather than
+  // building a second viewer.
+  // A quick run through a shortlist, comfortable viewing, and two for leaving
+  // it running on a screen. The speed button steps through them in order.
+  var SLIDE_PRESETS = [4000, 8000, 15000, 30000];
+  var SLIDE_MS = 8000;               // the default, until a visitor picks another
+  var IDLE_MS = 2500;                // stillness before the controls fade
+  var SPEED_KEY = 'psc-slide-ms';
+  // A visitor's own choice of speed is remembered in their browser. Only a
+  // value that is still one of the presets is honored, so changing the list
+  // later cannot strand anybody on a speed the button can no longer reach.
+  try {
+    var savedMs = parseInt(localStorage.getItem(SPEED_KEY), 10);
+    if (SLIDE_PRESETS.indexOf(savedMs) >= 0) SLIDE_MS = savedMs;
+  } catch (e) {}
+  var playBtn = lb.querySelector('.psc-play');
+  var speedBtn = lb.querySelector('.psc-speed');
+  var slideTimer = null, idleTimer = null, wakeLock = null;
+  // The outgoing frame, held on top while the new one loads underneath.
+  var fadeImg = document.createElement('img');
+  fadeImg.className = 'psc-fade'; fadeImg.alt = '';
+  lb.appendChild(fadeImg);
+  var calm = window.matchMedia && matchMedia('(prefers-reduced-motion:reduce)');
+
+  function playing(){ return !!slideTimer; }
+
+  // Cross-fade, unless the system has been asked for less motion, in which
+  // case the swap is a plain cut.
+  function crossFade(advance){
+    if ((calm && calm.matches) || !lbImg.src) { advance(); return; }
+    fadeImg.src = lbImg.src;
+    fadeImg.style.transition = 'none';
+    fadeImg.style.opacity = '1';
+    advance();
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        fadeImg.style.transition = '';
+        fadeImg.style.opacity = '0';
+      });
+    });
+  }
+
+  // Every tick re-arms its own successor rather than repeating on an interval,
+  // so a slow photograph cannot stack ticks up behind it.
+  function armSlide(){
+    clearTimeout(slideTimer);
+    // step() re-arms the clock itself, so a photograph reached by hand and one
+    // reached by the timer are treated the same.
+    slideTimer = setTimeout(function(){ crossFade(function(){ step(1); }); }, SLIDE_MS);
+  }
+
+  function wake(){
+    lb.classList.remove('psc-idle');
+    clearTimeout(idleTimer);
+    if (playing()) idleTimer = setTimeout(function(){
+      lb.classList.add('psc-idle');
+    }, IDLE_MS);
+  }
+
+  // The screen going to sleep halfway through is the one failure a slideshow
+  // cannot recover from. Unsupported everywhere it is unsupported, silently.
+  function holdScreen(on){
+    try {
+      if (on && navigator.wakeLock && !wakeLock)
+        navigator.wakeLock.request('screen').then(function(l){ wakeLock = l; },
+                                                  function(){});
+      else if (!on && wakeLock) { wakeLock.release(); wakeLock = null; }
+    } catch (e) {}
+  }
+
+  function syncPlay(){
+    if (!playBtn) return;
+    var on = playing();
+    playBtn.innerHTML = on ? '&#10074;&#10074;' : '&#9654;';
+    playBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    playBtn.setAttribute('aria-label', on ? 'Pause slideshow' : 'Play slideshow');
+    playBtn.title = (on ? 'Pause slideshow' : 'Play slideshow') + ' (P)';
+  }
+
+  function startSlide(){
+    if (playing() || order.length < 2) return;
+    armSlide(); holdScreen(true); syncPlay(); wake();
+  }
+  function stopSlide(){
+    clearTimeout(slideTimer); slideTimer = null;
+    clearTimeout(idleTimer); idleTimer = null;
+    lb.classList.remove('psc-idle');
+    holdScreen(false); syncPlay();
+  }
+  function toggleSlide(){ playing() ? stopSlide() : startSlide(); }
+
+  if (playBtn) playBtn.addEventListener('click', function(e){
+    e.stopPropagation(); toggleSlide();
+  });
+
+  function seconds(ms){ return Math.round(ms / 100) / 10; }
+  function syncSpeed(){
+    if (!speedBtn) return;
+    var s = seconds(SLIDE_MS);
+    speedBtn.textContent = s + 's';
+    speedBtn.setAttribute('aria-label', 'Slideshow speed: ' + s +
+                          (s === 1 ? ' second' : ' seconds') + ' per photo');
+  }
+  // The next preset along, wrapping back to the fastest. Mid-slideshow the
+  // photograph on screen starts its new, full interval from now.
+  if (speedBtn) speedBtn.addEventListener('click', function(e){
+    e.stopPropagation();                   // the backdrop would close the overlay
+    var at = SLIDE_PRESETS.indexOf(SLIDE_MS);
+    SLIDE_MS = SLIDE_PRESETS[(at + 1) % SLIDE_PRESETS.length];
+    try { localStorage.setItem(SPEED_KEY, String(SLIDE_MS)); } catch (e2) {}
+    syncSpeed();
+    if (playing()) armSlide();
+  });
+  syncSpeed();
+
+  // Anything at all from the visitor brings the controls back; while playing,
+  // it also restarts the countdown to their leaving again.
+  // Pointer events cover touch as well, so there is no separate touch listener.
+  ['pointermove', 'keydown', 'focusin']
+    .forEach(function(ev){ lb.addEventListener(ev, wake, {passive: true}); });
+  // Whether the controls were still hidden when the press landed. This matters
+  // on a touchscreen and only there: a mouse wakes them on the way to the
+  // click, so by then a click on the backdrop means what it always meant. A
+  // finger has no way to hover first, so its first tap has to be the one that
+  // brings the controls back rather than closing the overlay.
+  var pressedHidden = false;
+  lb.addEventListener('pointerdown', function(){
+    pressedHidden = playing() && lb.classList.contains('psc-idle');
+    wake();
+  }, {passive: true});
+
+  // A slideshow left in a background tab would run through the whole folder
+  // unseen, so it holds its place instead.
+  document.addEventListener('visibilitychange', function(){
+    if (!lb.classList.contains('open') || !playing()) return;
+    if (document.hidden) clearTimeout(slideTimer);
+    else { armSlide(); holdScreen(true); }
+  });
 
   var lockPrev = null;
   // Pinning the body at its current offset stops the page moving behind the
@@ -2388,8 +2598,9 @@ GALLERY_JS = r"""
     // clicked several swipes ago.
     var card = cur >= 0 && order.length
       ? grid.querySelector('.psc-card[data-idx="' + order[cur] + '"]') : null;
+    stopSlide();
     lb.classList.remove('open');
-    lbImg.src='';
+    lbImg.src=''; fadeImg.src = ''; fadeImg.style.opacity = '0';
     setScrollLock(false);
     if (card && !card.classList.contains('psc-hidden'))
       card.scrollIntoView({block: 'center'});
@@ -2430,7 +2641,13 @@ GALLERY_JS = r"""
     step(dx < 0 ? 1 : -1);
   }, {passive: true});
   // Backdrop closes; the photo and the arrows must not.
-  lb.addEventListener('click', function(e){ if (e.target === lb) navCloseLb(); });
+  lb.addEventListener('click', function(e){
+    if (e.target !== lb) return;
+    // Mid-slideshow, with the controls faded out, a click on the backdrop is
+    // far more likely to mean "show me the buttons" than "close this".
+    if (pressedHidden) { pressedHidden = false; return; }
+    navCloseLb();
+  });
   lbImg.addEventListener('click', function(e){ e.stopPropagation(); });
   navPrev.addEventListener('click', function(e){ e.stopPropagation(); step(-1); });
   navNext.addEventListener('click', function(e){ e.stopPropagation(); step(1); });
@@ -2463,6 +2680,7 @@ GALLERY_JS = r"""
     if (e.key === 'Escape') navCloseLb();
     else if (e.key === 'ArrowLeft')  { e.preventDefault(); step(-1); }
     else if (e.key === 'ArrowRight') { e.preventDefault(); step(1); }
+    else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); toggleSlide(); }
     else if (e.key === 'Home') { e.preventDefault(); cur = 0; show(); writeHash('photo', false); }
     else if (e.key === 'End')  { e.preventDefault(); cur = order.length - 1; show();
                                  writeHash('photo', false); }
@@ -2569,7 +2787,7 @@ GALLERY_JS = r"""
     closeFolder(); writeHash('', false);
   }
 
-  // Reads the query string, and still honours the '#' form that earlier
+  // Reads the query string, and still honors the '#' form that earlier
   // versions of this page produced, so links already sent out keep working.
   function readTarget(){
     var q = (location.search || '').replace(/^\?/, '').split('&');
@@ -2847,7 +3065,14 @@ def build_gallery_html(items: list[dict], tags_by_id: dict,
            'aria-label="Like this photograph">'
            '\u2764\ufe0f</button><span class="psc-hcount"></span></div>'
            if hearts_url else '') +
+        '<span class="psc-lbfoot">'
+        '<button class="psc-play" type="button" aria-pressed="false" '
+        'aria-label="Play slideshow" title="Play slideshow (P)">&#9654;</button>'
+        '<button class="psc-speed" type="button" '
+        'aria-label="Slideshow speed: 8 seconds per photo" '
+        'title="Seconds per photo - press to change">8s</button>'
         '<span class="psc-count-lb"></span>'
+        '</span>'
         '<button class="psc-link-lb" type="button" '
         'title="Copy a link that opens this photograph">Copy link to photo</button>'
         '<img alt=""></div>'
@@ -3113,10 +3338,10 @@ def main(argv=None) -> int:
                          "HEARTS_ADMIN_TOKEN.")
     ap.add_argument("--folder-outline", metavar="HEX",
                     default=DEFAULT_FOLDER_OUTLINE,
-                    help=f"Outline colour of the folder tiles on the index, as "
+                    help=f"Outline color of the folder tiles on the index, as "
                          f"a hex value like {DEFAULT_FOLDER_OUTLINE}. The tiles "
                          f"keep the page's own background; only the folder "
-                         f"shape is coloured. A colour too dark to see against "
+                         f"shape is colored. A color too dark to see against "
                          f"that background is lifted until it is.")
     ap.add_argument("--view", choices=("folders", "all"), default="folders",
                     help="Which view the gallery opens on. 'folders' shows an "
@@ -3131,7 +3356,8 @@ def main(argv=None) -> int:
                     help="Build everything and write the HTML locally, but upload "
                          "nothing and touch nothing in Ghost")
     ap.add_argument("--emit-html", metavar="FILE",
-                    help="Also write the generated gallery to a local file for inspection")
+                    help="Also write the generated gallery to a local file for "
+                         f"inspection. A --dry-run without it writes {DRYRUN_HTML}")
     args = ap.parse_args(argv)
 
     # Written into the page's stylesheet, so it is checked before anything is
@@ -3139,7 +3365,7 @@ def main(argv=None) -> int:
     # numbers, so a value carrying CSS of its own cannot survive the trip -
     # this is only here so a typo reads as a sentence rather than a traceback.
     if not ps.outline_ok(args.folder_outline):
-        ps.log(f"ERROR: --folder-outline {args.folder_outline!r} is not a colour.")
+        ps.log(f"ERROR: --folder-outline {args.folder_outline!r} is not a color.")
         ps.log("       Wanted a hex value like #b09468 or #b96, and nothing else.")
         return 2
 
@@ -3303,7 +3529,7 @@ def main(argv=None) -> int:
     if args.emit_html or args.dry_run:
         # The local page always renders from the files on disk, so it must live
         # in out_dir for thumbs/ and previews/ to resolve beside it.
-        dest = Path(args.emit_html) if args.emit_html else out_dir / "ghost_preview.html"
+        dest = Path(args.emit_html) if args.emit_html else out_dir / DRYRUN_HTML
         if dest.parent.resolve() != out_dir.resolve():
             ps.log(f"NOTE: {dest.name} must sit in {out_dir} for its images to "
                    f"resolve; writing it there instead.")

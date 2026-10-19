@@ -160,7 +160,7 @@ check("ranked most-hearted first",
       sorted([x["count"] for x in r.json["top"]], reverse=True), str(r.json["top"]))
 check("it includes the paths, which is why it is private",
       any("Wyoming" in x["rel_path"] for x in r.json["top"]), str(r.json["top"]))
-check("limit is honoured", len(r.json["top"]) <= 2)
+check("limit is honored", len(r.json["top"]) <= 2)
 r = C.get("/api/hearts/top?limit=abc", headers=ADMIN)
 check("a nonsense limit is a 400, not a crash", r.status_code == 400)
 
@@ -215,7 +215,7 @@ hearts.app.config["TESTING"] = True
 C = hearts.app.test_client()
 check("hearts survive a restart of the service",
       C.get("/api/hearts").json["counts"] == before, str(C.get("/api/hearts").json))
-check("and this browser is still recognised",
+check("and this browser is still recognized",
       C.get("/api/hearts", headers=V(b)).json["mine"] == [P1])
 
 # A rescore rewrites scores.sqlite3 and republishes; the allowlist is rewritten

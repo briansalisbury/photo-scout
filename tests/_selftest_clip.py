@@ -65,7 +65,7 @@ check("one row per prompt", t.shape[0] == 5, f"got {t.shape[0]}")
 tn = t / t.norm(dim=-1, keepdim=True)
 inn = i / i.norm(dim=-1, keepdim=True)
 check("norm() works on extracted text features", torch.isfinite(tn).all())
-check("normalised rows are unit length",
+check("normalized rows are unit length",
       torch.allclose(tn.norm(dim=-1), torch.ones(5), atol=1e-5))
 sims = (inn @ tn.T).squeeze(0)
 check("image-vs-text similarity matmul works", sims.shape == (5,), str(tuple(sims.shape)))

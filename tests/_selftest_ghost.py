@@ -247,11 +247,13 @@ rc, log = run("--dry-run")
 check("dry run succeeds", rc == 0, f"rc={rc}")
 check("nothing uploaded", len(STATE["uploads"]) == 0)
 check("no page created", not STATE["pages"])
-check("preview html written", (OUT / "ghost_preview.html").exists())
+check("preview html written", (OUT / pg.DRYRUN_HTML).exists())
+check("under the name a dry run is documented to use",
+      pg.DRYRUN_HTML == "ghost_dryrun.html" and "ghost_dryrun.html" in log, pg.DRYRUN_HTML)
 
 # The point of a dry run is seeing the gallery. Every image it references must
 # actually exist on disk relative to the preview file.
-_pv = (OUT / "ghost_preview.html").read_text(encoding="utf-8")
+_pv = (OUT / pg.DRYRUN_HTML).read_text(encoding="utf-8")
 # The payload carries the gallery names alongside the photographs, so the
 # photographs are the "p" half of it.
 _data = json.loads(re.search(r'class="psc-data">(.*?)</script>', _pv, re.S).group(1)
@@ -739,7 +741,7 @@ with sync_playwright() as pw:
     check("a fault, when there is one, rides in its own field",
           all(e["w"] in ps.DEFECT_TEXTS for e in data if "w" in e),
           str([e.get("w") for e in data if "w" in e][:2]))
-    check("and is coloured rather than buried in the sentence",
+    check("and is colored rather than buried in the sentence",
           P.eval_on_selector_all(".psc-flag", "e => e.length")
           == sum(1 for e in data if e.get("w")),
           str(P.eval_on_selector_all(".psc-flag", "e => e.map(x=>x.textContent)")[:2]))
@@ -1254,7 +1256,7 @@ with sync_playwright() as pw:
     check("it warns before deleting", "Darkroom" in seen.get("msg", ""), seen.get("msg"))
     check("the warning says how far it reaches",
           "1 photo that uses it" in seen.get("msg", ""), seen.get("msg"))
-    check("cancelling leaves the tag alone", tag_count("Darkroom") == 1)
+    check("canceling leaves the tag alone", tag_count("Darkroom") == 1)
     P.once("dialog", lambda d: d.accept())
     P.locator(".psc-tagmenu .psc-delall").first.click(); P.wait_for_timeout(300)
     check("accepting removes it everywhere", tag_count("Darkroom") == 0)

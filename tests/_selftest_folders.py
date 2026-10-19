@@ -94,7 +94,7 @@ SWATCHES = [
 ]
 for swatch in SWATCHES:
     pal = pg.folder_palette(swatch)
-    check(f"{swatch}: both colours are real hex values",
+    check(f"{swatch}: both colors are real hex values",
           all(re.fullmatch(r"#[0-9a-f]{6}", pal[k]) for k in ("line", "hover")),
           str(pal))
     seen = pg.contrast(pg._hex_rgb(pal["line"]), pg._hex_rgb(pg.TILE_BG))
@@ -106,7 +106,7 @@ for swatch in SWATCHES:
     check(f"{swatch}: hover is brighter than the resting line",
           lit >= seen, f"{lit:.2f} vs {seen:.2f}")
 
-check("a colour already bright enough is left exactly as given",
+check("a color already bright enough is left exactly as given",
       pg.folder_palette("#b09468")["line"] == "#b09468")
 check("and one too dark is lifted rather than rejected",
       pg.folder_palette("#3a2f1d")["line"] != "#3a2f1d",
@@ -115,7 +115,7 @@ check("and one too dark is lifted rather than rejected",
 import colorsys as _cs                                             # noqa: E402
 _h_in = _cs.rgb_to_hls(*pg._hex_rgb("#3a2f1d"))[0]
 _h_out = _cs.rgb_to_hls(*pg._hex_rgb(pg.folder_palette("#3a2f1d")["line"]))[0]
-check("a lifted colour keeps its hue", abs(_h_in - _h_out) < 0.02,
+check("a lifted color keeps its hue", abs(_h_in - _h_out) < 0.02,
       f"{_h_in:.3f} -> {_h_out:.3f}")
 
 check("the default sits at the same weight as the page's muted text",
@@ -190,10 +190,10 @@ check("--folder-outline reaches the stylesheet",
 check("and the default is used when it is not given",
       f"--psc-fold-line:{pg.DEFAULT_FOLDER_OUTLINE}" in html,
       pg.DEFAULT_FOLDER_OUTLINE)
-check("no colour placeholder survives into the page",
+check("no color placeholder survives into the page",
       "__FOLD" not in html and "__FOLD" not in tinted)
 # The tile must keep the page's own card, or this stops being an outline.
-check("the tile background is still the page's card colour",
+check("the tile background is still the page's card color",
       ".psc-fold{background:var(--psc-card)" in html)
 
 # A media query carries no extra specificity, so a base rule declared later
@@ -561,7 +561,7 @@ with sync_playwright() as pw:
     check("the bar stays compact on a phone", bar_h < 844 * 0.15, f"{bar_h:.0f}px of 844")
     def bg4(sel):
         return P4.eval_on_selector(sel, "e => getComputedStyle(e).backgroundColor")
-    check("the active view and the active band are different colours",
+    check("the active view and the active band are different colors",
           bg4(".psc-views button.on") != bg4(".psc-bar button[data-band].on"))
     # The header carries the longest label on the page - "Copy link to gallery"
     # - beside a folder name that can be long in its own right.

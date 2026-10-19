@@ -203,7 +203,7 @@ else:
           f"all {len(extracted)} are {W}x{H} (scoring proxy was {ps.SCORING_SIZE}px)")
 
 # color check proves the seek landed in the correct segment
-print("  seek accuracy (colour of extracted frame vs its segment):")
+print("  seek accuracy (color of extracted frame vs its segment):")
 acc_ok = True
 for r in sorted(extracted, key=lambda r: (r["source_video"], r["timestamp_s"])):
     if r["source_video"] != str(MULTI):

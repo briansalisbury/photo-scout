@@ -140,7 +140,7 @@ with open(OUT / "report.csv", encoding="utf-8-sig") as fh:
     fullcsv = list(_csv.DictReader(fh))
 check("full csv still has everything", len(fullcsv) > len(got), f"{len(fullcsv)} vs {len(got)}")
 
-print("\n=== scoring behaviour is unchanged ===")
+print("\n=== scoring behavior is unchanged ===")
 scores_before = {r["path"]: r["composite"] for r in rows}
 rc, _ = run(short, "--force")
 db2 = sqlite3.connect(OUT / "scores.sqlite3"); db2.row_factory = sqlite3.Row

@@ -105,7 +105,7 @@ with sync_playwright() as pw:
     now = chips_of(1)
     check("no tag contains a bracket or quote",
           all(not any(ch in t for ch in '<>"\'&') for t in now), str(now))
-    check("sanitised remnant kept as plain text",
+    check("sanitized remnant kept as plain text",
           any("img" in t for t in now), str(now))
     check("no script executed", not errors, str(errors[:2]))
     check("page has no injected img element",
@@ -125,20 +125,20 @@ with sync_playwright() as pw:
     check("case-insensitive duplicate rejected",
           sum(1 for t in chips_of(1) if t.lower() == "lake photos") == 1, str(chips_of(1)))
 
-    print("\n=== colours are unique per tag and stable ===")
-    colours = page.eval_on_selector_all(".card .tag", """els => els.map(e => ({
+    print("\n=== colors are unique per tag and stable ===")
+    colors = page.eval_on_selector_all(".card .tag", """els => els.map(e => ({
         name: e.firstChild.textContent,
         bg: getComputedStyle(e).backgroundColor}))""")
     by_name = {}
-    for c in colours:
+    for c in colors:
         by_name.setdefault(c["name"], set()).add(c["bg"])
-    check("each tag has exactly one colour",
+    check("each tag has exactly one color",
           all(len(v) == 1 for v in by_name.values()),
           str({k: v for k, v in by_name.items() if len(v) > 1}))
     distinct = {list(v)[0] for v in by_name.values()}
-    check("different tags have different colours",
-          len(distinct) == len(by_name), f"{len(distinct)} colours for {len(by_name)} tags")
-    check("colours are actually applied (not the default)",
+    check("different tags have different colors",
+          len(distinct) == len(by_name), f"{len(distinct)} colors for {len(by_name)} tags")
+    check("colors are actually applied (not the default)",
           all("rgb" in list(v)[0] for v in by_name.values()))
 
     print("\n=== tag on a second card, then search ===")
@@ -180,7 +180,7 @@ with sync_playwright() as pw:
         const el = [...document.querySelectorAll('.card .tag')]
             .find(e => e.firstChild.textContent === 'Lake Photos');
         return el ? getComputedStyle(el).backgroundColor : null; }""")
-    check("chip colour matches the same tag on a card", chip_bg == card_bg,
+    check("chip color matches the same tag on a card", chip_bg == card_bg,
           f"{chip_bg} vs {card_bg}")
 
     print("\n=== a second chip WIDENS the results (OR, not AND) ===")
@@ -308,7 +308,7 @@ with sync_playwright() as pw:
           "the 1 photo that uses it" in seen.get("msg", ""), seen.get("msg"))
     check("and warns about the ones you cannot see",
           "hidden" in seen.get("msg", "").lower(), seen.get("msg"))
-    check("cancelling changes nothing",
+    check("canceling changes nothing",
           page.evaluate("() => tagCount('Retireme')") == 1,
           str(page.evaluate("() => tagCount('Retireme')")))
 

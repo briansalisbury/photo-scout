@@ -23,6 +23,14 @@ The criteria checked here, and why each is checked this way:
   4.1.2  every control has a name
   4.1.3  a message that appears without a page change is announced
 
+Form fields are measured separately, and again inside a theme that fights
+back. The text check below walks text nodes, and what is typed into a field
+is not one - which is how a search box drawing dark gray on a dark box got
+past it. A published gallery also lives inside somebody else's theme, and
+themes set -webkit-text-fill-color on fields: in WebKit and Chromium that
+paints the text instead of color, so a field can have the right color and
+still draw the wrong one. Both are measured as painted.
+
 Both pages are built from the same fixtures the folder suites use, so a change
 that breaks one of them breaks this too.
 """
@@ -81,6 +89,24 @@ GALLERY.write_text(
     "<title>Photo Scout Gallery</title></head>"
     "<body style='margin:0;background:#111'>"
     + pg.build_gallery_html(items, {}) + "</body></html>", encoding="utf-8")
+
+# The same gallery inside a hostile theme: the rules a Ghost theme applies to
+# form controls in page content, including the fill color that caused the
+# unreadable search box, and a dim placeholder.
+THEME = (
+    "<style>"
+    ".gh-content input,.gh-content select,.gh-content textarea,.gh-content button"
+    "{color:#394047;-webkit-text-fill-color:#394047}"
+    ".gh-content input::placeholder{color:#8e9cac;-webkit-text-fill-color:#8e9cac;"
+    "opacity:.6}"
+    "</style>")
+THEMED = OUT / "themed.html"
+THEMED.write_text(
+    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+    "<title>Photo Scout Gallery</title>" + THEME + "</head>"
+    "<body style='margin:0;background:#fff'><div class='gh-content'>"
+    + pg.build_gallery_html(items, {}) + "</div></body></html>", encoding="utf-8")
 
 # The local report, from a real scoring run over a small library.
 rng = np.random.default_rng(3)
@@ -148,6 +174,62 @@ UNNAMED = """els => els.filter(e => e.offsetParent !== null)
 # one state a screen reader cannot work with: it falls back to the file name.
 NO_ALT = """els => els.filter(e => !e.hasAttribute('alt'))
     .map(e => (e.className || e.id || 'img') + ' ' + (e.src || '').slice(0, 40))"""
+
+
+# What a control actually paints, and on what. The fill color wins over color
+# wherever it is set to anything but currentColor, so it is the one to read.
+PAINTED = """(els, pseudo) => {
+    const opaque = (c) => c && !/rgba\\(0, 0, 0, 0\\)|transparent/.test(c);
+    const bg = (el) => { for (let e = el; e; e = e.parentElement) {
+        const c = getComputedStyle(e).backgroundColor; if (opaque(c)) return c; }
+        return 'rgb(255, 255, 255)'; };
+    return els.filter(e => e.offsetParent !== null).map(e => {
+        const s = getComputedStyle(e, pseudo || null);
+        const fill = s.webkitTextFillColor;
+        return {what: e.tagName + '.' + (e.className || e.id || ''),
+                ink: opaque(fill) ? fill : s.color,
+                alpha: +(s.opacity || 1), bg: bg(e)}; }); }"""
+
+
+def fields(page, name, controls):
+    """Typed text, placeholders and button labels, measured as painted."""
+    print(f"-- fields and controls, as painted: {name} --")
+    # Typed text: put something in every visible text field first.
+    page.eval_on_selector_all(
+        "input[type=search], input[type=text], input:not([type])",
+        "els => els.filter(e => e.offsetParent !== null).forEach(e => { e.value = 'Ghost'; })")
+    worst = []
+    for f in page.eval_on_selector_all(
+            "input[type=search], input[type=text], input:not([type]), select",
+            PAINTED, None):
+        r = contrast(f["ink"], f["bg"])
+        if r < 4.5:
+            worst.append(f"{f['what']} {r:.2f}:1")
+    check("what is typed into a field, and the sort box, can be read",
+          not worst, "; ".join(worst))
+    page.eval_on_selector_all(
+        "input[type=search], input[type=text], input:not([type])",
+        "els => els.forEach(e => { e.value = ''; })")
+    worst = []
+    for f in page.eval_on_selector_all(
+            "input[type=search], input[type=text], input:not([type])",
+            PAINTED, "::placeholder"):
+        # A dimmed placeholder is the ink blended toward its background.
+        ink = [int(v) for v in __import__("re").findall(r"\d+", f["ink"])[:3]]
+        bgc = [int(v) for v in __import__("re").findall(r"\d+", f["bg"])[:3]]
+        a = f["alpha"]
+        mixed = "rgb(" + ", ".join(str(round(a * x + (1 - a) * y))
+                                   for x, y in zip(ink, bgc)) + ")"
+        r = contrast(mixed, f["bg"])
+        if r < 4.5:
+            worst.append(f"{f['what']} {r:.2f}:1")
+    check("and so can every placeholder", not worst, "; ".join(worst))
+    worst = []
+    for f in page.eval_on_selector_all(controls, PAINTED, None):
+        r = contrast(f["ink"], f["bg"])
+        if r < 4.5:
+            worst.append(f"{f['what']} {r:.2f}:1")
+    check("every button label in the toolbar can be read", not worst, "; ".join(worst))
 
 
 def audit(page, name, tile, shot, bar, dialog, closer):
@@ -278,6 +360,7 @@ with sync_playwright() as pw:
     P = br.new_context(viewport={"width": 1400, "height": 950}).new_page()
     P.on("pageerror", lambda e: errors.append(str(e)))
     P.goto(GALLERY.resolve().as_uri()); P.wait_for_timeout(600)
+    fields(P, "the published gallery", ".psc-bar button:not([disabled])")
     audit(P, "the published gallery", ".psc-fold", ".psc-shot", ".psc-bar",
           ".psc-lb", ".psc-lb .x")
     # Only the published page has toggles for a view and a band.
@@ -303,7 +386,22 @@ with sync_playwright() as pw:
     check("and has one main landmark to skip the toolbar with (2.4.1)",
           R.eval_on_selector_all("main", "e => e.length") == 1
           and R.eval_on_selector("main", "e => !!e.querySelector('#grid, #folders')"))
+    fields(R, "the local report", "header button:not([disabled])")
     audit(R, "the local report", ".fold", ".shot", "header", "#lb", "#lb-close")
+
+    print("\n=== the published gallery inside a hostile theme ===")
+    T = br.new_context(viewport={"width": 1400, "height": 950}).new_page()
+    T.on("pageerror", lambda e: errors.append(str(e)))
+    T.goto(THEMED.resolve().as_uri()); T.wait_for_timeout(500)
+    fields(T, "themed", ".psc-bar button:not([disabled])")
+    T.click(".psc-fold"); T.wait_for_timeout(300)
+    fields(T, "themed, inside a folder", ".psc-bar button:not([disabled]), .psc-crumb button")
+    # And on a phone, where the screenshot that found this was taken.
+    M = br.new_context(viewport={"width": 390, "height": 844}, has_touch=True,
+                       is_mobile=True).new_page()
+    M.on("pageerror", lambda e: errors.append(str(e)))
+    M.goto(THEMED.resolve().as_uri()); M.wait_for_timeout(500)
+    fields(M, "themed, on a phone", ".psc-bar button:not([disabled])")
 
     check("no page errors anywhere", not errors, "; ".join(errors[:3]))
     br.close()

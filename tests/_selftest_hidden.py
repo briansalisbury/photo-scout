@@ -27,7 +27,7 @@ def check(label, cond, extra=""):
     print(f"{'PASS' if cond else 'FAIL'}  {label}" + (f"  {extra}" if extra else ""))
 
 
-print("=== recognising a hidden path ===")
+print("=== recognizing a hidden path ===")
 H = ps.HIDE_DIR_NAME
 for path, want in (
         (f"{H}/DSC_0001.NEF", True),
@@ -178,7 +178,7 @@ check("renaming the folder back restores them, still with no rescore",
       "IMG_7000" in (OUT2 / "report.html").read_text(encoding="utf-8"))
 cache.close() if hasattr(cache, "close") else None
 
-print("\n=== the Ghost page honours it too ===")
+print("\n=== the Ghost page honors it too ===")
 PRIVATE.rename(LIB2 / "2011-06-28 - Wyoming" / "hide_from_photo_scout")
 with contextlib.redirect_stdout(io.StringIO()):
     ps.build_reports(ps.Cache(OUT2 / "scores.sqlite3"), OUT2, LIB2)
