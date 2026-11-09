@@ -97,6 +97,7 @@ import re
 import sqlite3
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -320,6 +321,82 @@ def social_fields(title: str, description: str) -> dict:
     }
 
 
+# Who may open the published gallery, in Ghost's own words, so that what
+# --access says is what Ghost admin shows. Ghost enforces it on the server: a
+# visitor without access is sent the theme's sign-in prompt instead of the page,
+# and never receives the gallery at all.
+ACCESS_LEVELS = ("public", "members", "paid", "tiers")
+ACCESS_LABELS = {"public": "public", "members": "members only",
+                 "paid": "paid members only", "tiers": "specific tiers only"}
+
+
+def access_fields(access: Optional[str], tier_ids=()) -> dict:
+    """
+    The page fields that say who may open it, or nothing at all.
+
+    Nothing at all is how a republish without --access leaves an existing
+    page's access exactly as it is: a gallery somebody restricted in Ghost admin
+    must never be opened up by a routine update.
+    """
+    if not access:
+        return {}
+    out = {"visibility": access}
+    if access == "tiers":
+        out["tiers"] = [{"id": tid} for tid in tier_ids]
+    return out
+
+
+# Ghost's ids are 24 hex characters; this is looser so a future format still
+# works, but anything that could carry markup, quotes or a path is refused.
+_TIER_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def shown(text, limit: int = 200) -> str:
+    """
+    Text from the command line or the site, made safe to print to a terminal.
+
+    Control and formatting characters are dropped, so a tier name cannot carry
+    an escape sequence that rewrites the screen or hides part of a message.
+    """
+    out = "".join(ch for ch in str(text)
+                  if unicodedata.category(ch)[0] != "C"
+                  and unicodedata.category(ch) not in ("Zl", "Zp"))
+    return out if len(out) <= limit else out[:limit] + "..."
+
+
+def usable_tiers(available: list) -> list:
+    """The active tiers with an id that looks like one."""
+    return [t for t in available
+            if isinstance(t, dict) and t.get("active", True)
+            and isinstance(t.get("id"), str) and _TIER_ID.fullmatch(t["id"])]
+
+
+def resolve_tiers(available: list, wanted: str) -> tuple:
+    """
+    Turn "Gold, Silver" into Ghost tier ids, matching a tier's name or slug.
+
+    Returns (ids, unknown names). Archived tiers are left out: nobody can join
+    one, so restricting a gallery to it would lock everybody out.
+
+    What you type is only ever compared with the site's own tiers; the page is
+    sent the ids Ghost itself listed, never the text. A tier whose id does not
+    look like one is ignored rather than passed along.
+    """
+    active = usable_tiers(available)
+    ids, unknown = [], []
+    for name in (w.strip() for w in wanted.split(",")):
+        if not name:
+            continue
+        hit = next((t for t in active
+                    if name.lower() in (str(t.get("slug", "")).lower(),
+                                        str(t.get("name", "")).lower())), None)
+        if hit is None:
+            unknown.append(name)
+        elif hit["id"] not in ids:
+            ids.append(hit["id"])
+    return ids, unknown
+
+
 class GhostClient:
     """
     Talks to the Ghost Admin API.
@@ -421,11 +498,16 @@ class GhostClient:
         pages = out.get("pages") or []
         return pages[0] if pages else None
 
+    def list_tiers(self) -> list:
+        """The site's membership tiers - free, paid, active and archived."""
+        tiers = self._request("GET", "/tiers/?limit=all").get("tiers")
+        return [t for t in tiers if isinstance(t, dict)] if isinstance(tiers, list) else []
+
     def create_page(self, slug: str, title: str, lexical: str, status: str,
-                    description: str = "") -> dict:
+                    description: str = "", access: Optional[dict] = None) -> dict:
         body = json.dumps({"pages": [dict({
             "slug": slug, "title": title, "lexical": lexical, "status": status,
-        }, **social_fields(title, description))]}).encode("utf-8")
+        }, **social_fields(title, description), **(access or {}))]}).encode("utf-8")
         # No ?source= parameter. Lexical is Ghost's native storage format, so it
         # is sent as-is; `source` exists only to request conversion FROM html,
         # and passing source=lexical is rejected with a 422 AllowedValues error.
@@ -434,13 +516,13 @@ class GhostClient:
         return out["pages"][0]
 
     def update_page(self, page: dict, title: str, lexical: str, status: str,
-                    description: str = "") -> dict:
+                    description: str = "", access: Optional[dict] = None) -> dict:
         # updated_at is Ghost's optimistic-concurrency check; without it the
         # edit is rejected.
         body = json.dumps({"pages": [dict({
             "id": page["id"], "updated_at": page["updated_at"],
             "slug": page["slug"], "title": title, "lexical": lexical, "status": status,
-        }, **social_fields(title, description))]}).encode("utf-8")
+        }, **social_fields(title, description), **(access or {}))]}).encode("utf-8")
         out = self._request("PUT", f"/pages/{page['id']}/", data=body,
                             content_type="application/json")
         return out["pages"][0]
@@ -3352,6 +3434,17 @@ def main(argv=None) -> int:
                     help="Allow a plain http:// site or heart endpoint. Off by "
                          "default: it sends the Admin API key in the clear.")
     ap.add_argument("--limit", type=int, help="Only publish the top N photographs")
+    ap.add_argument("--access", choices=ACCESS_LEVELS,
+                    help="Who may open the gallery: public, members (anyone signed "
+                         "in), paid (paying members), or tiers (the ones named by "
+                         "--tiers). Ghost enforces it, and a visitor without access "
+                         "sees your theme's sign-in prompt. A new page is public "
+                         "unless this says otherwise; republishing WITHOUT it leaves "
+                         "an existing page's access exactly as it is. The photographs "
+                         "themselves stay reachable by direct link - see the README.")
+    ap.add_argument("--tiers", metavar="NAMES",
+                    help="With --access tiers: the tiers that may open the gallery, "
+                         "by name or slug, comma-separated - e.g. \"Gold,Silver\"")
     ap.add_argument("--dry-run", action="store_true",
                     help="Build everything and write the HTML locally, but upload "
                          "nothing and touch nothing in Ghost")
@@ -3367,6 +3460,15 @@ def main(argv=None) -> int:
     if not ps.outline_ok(args.folder_outline):
         ps.log(f"ERROR: --folder-outline {args.folder_outline!r} is not a color.")
         ps.log("       Wanted a hex value like #b09468 or #b96, and nothing else.")
+        return 2
+
+    # The two flags only make sense together; caught before anything uploads.
+    if args.access == "tiers" and not (args.tiers or "").strip():
+        ps.log("ERROR: --access tiers needs --tiers to say which ones, "
+               "e.g. --tiers \"Gold,Silver\".")
+        return 2
+    if args.tiers and args.access != "tiers":
+        ps.log("ERROR: --tiers only applies with --access tiers.")
         return 2
 
     out_dir = Path(args.out).expanduser().resolve() if args.out else ps.DEFAULT_OUT_DIR
@@ -3480,6 +3582,46 @@ def main(argv=None) -> int:
     client = None if args.dry_run else GhostClient(admin_url, admin_key,
                                                    user_agent=args.user_agent)
 
+    # Who may open it, settled before a single image is uploaded: a misspelled
+    # tier should cost a second, not an upload run.
+    tier_ids = []
+    if args.access and args.access != "public":
+        ps.log(f"Access: {ACCESS_LABELS[args.access]}"
+               + (f" ({shown(args.tiers)})" if args.access == "tiers" else ""))
+    if args.access in ("paid", "tiers") and args.dry_run:
+        ps.log("        tiers are not checked in a dry run, which has no key")
+    elif args.access in ("paid", "tiers"):
+        try:
+            tiers = client.list_tiers()
+        except GhostError as exc:
+            if args.access == "tiers":
+                ps.log("ERROR: could not read the site's tiers, so --tiers cannot "
+                       "be matched to them.")
+                ps.log(f"       {str(exc).splitlines()[0]}")
+                return 2
+            tiers = None
+            ps.log("WARNING: could not read the site's tiers to check that anyone "
+                   "can be a paid member.")
+        if args.access == "tiers":
+            tier_ids, unknown = resolve_tiers(tiers, args.tiers)
+            if unknown or not tier_ids:
+                names = ", ".join(shown(t.get("name", t.get("slug", "?")), 60)
+                                  for t in usable_tiers(tiers)) or "none"
+                missing = (", ".join(f'"{shown(u, 60)}"' for u in unknown)
+                           or f'"{shown(args.tiers)}"')
+                ps.log(f"ERROR: no active tier called {missing}.")
+                ps.log(f"       This site's tiers: {names}")
+                return 2
+        elif tiers is not None and not any(
+                t.get("type") == "paid" and t.get("active", True) for t in tiers):
+            ps.log("WARNING: this site has no active paid tier, so nobody can be a "
+                   "paid member and nobody will be able to open the gallery.")
+    if args.access in ("members", "paid", "tiers"):
+        ps.log("        Members sign in through Ghost. If anyone may sign up on your "
+               "site, set it to")
+        ps.log("        invite-only (Settings -> Membership) for a gallery that is "
+               "actually private.")
+
     stats = publish_images(client, manifest, items, args.dry_run)
     if stats["would_upload"]:
         ps.log(f"Images: {stats['would_upload']} would be uploaded, "
@@ -3563,13 +3705,26 @@ def main(argv=None) -> int:
     lexical = lexical_with_html_card(gallery)
     existing = client.find_page(args.slug)
     if existing:
+        was = existing.get("visibility") or "public"
         page = client.update_page(existing, page_title, lexical, args.status,
-                                  args.description)
+                                  args.description, access_fields(args.access, tier_ids))
         ps.log(f"Updated existing page /{page['slug']}/ ({page['status']})")
     else:
+        was = None
+        # A new page is public unless --access says otherwise - sent explicitly,
+        # so a site whose default for new content is members-only still gets
+        # the gallery its owner asked for.
         page = client.create_page(args.slug, page_title, lexical, args.status,
-                                  args.description)
+                                  args.description,
+                                  access_fields(args.access or "public", tier_ids))
         ps.log(f"Created page /{page['slug']}/ ({page['status']})")
+    now = page.get("visibility") or args.access or was or "public"
+    if was and not args.access:
+        ps.log(f"Access: {ACCESS_LABELS.get(now, now)} (unchanged; --access changes it)")
+    elif was and was != now:
+        ps.log(f"Access: {ACCESS_LABELS.get(now, now)} (was {ACCESS_LABELS.get(was, was)})")
+    else:
+        ps.log(f"Access: {ACCESS_LABELS.get(now, now)}")
 
     ps.log(f"View: {args.site.rstrip('/')}/{page['slug']}/")
     if page["status"] == "draft":

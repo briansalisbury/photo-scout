@@ -8,38 +8,39 @@
 
 
 # ===========================================================================
-# 1. Put the hearts container on the same network as Caddy
+# 1. Check Caddy can reach the hearts container
 # ===========================================================================
 #
-# `wget: bad address 'hearts:8091'` from inside the Caddy container means
-# Docker's DNS cannot see the service - they are on different networks. The
-# hearts block did not declare a `networks:` key, so Compose put it on the
-# default network while Caddy sits on one the Ghost stack declares explicitly.
+# compose.hearts.yml already puts hearts on `ghost_network`, the network Caddy
+# uses in the official Ghost Docker setup. Confirm the two can see each other:
 #
-# Find what Caddy is on:
+#     docker compose exec caddy wget -qO- 'http://hearts:8091/api/hearts/_health'
+#
+# Expect {"ok":true,"schema_version":1}. Keep the address in quotes: zsh can
+# otherwise rewrite it as you paste.
+#
+# `wget: bad address 'hearts:8091'` means they are on different networks -
+# your stack names its network something else. Find what Caddy is on:
 #
 #     docker inspect -f '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' <caddy-container>
 #
-# Then give the hearts service the SAME `networks:` list that the caddy
-# service has in docker-compose.yml. If Caddy's block says:
+# and give hearts the SAME `networks:` list the caddy service has in Ghost's
+# compose.yml. If Caddy's block says:
 #
 #     caddy:
 #       networks:
 #         - ghost
 #
-# then hearts needs exactly that too:
-
-  hearts:
-    build: ./hearts
-    restart: unless-stopped
-    networks:
-      - ghost              # <-- match whatever the caddy service declares
-    # ... the rest of the block unchanged ...
-
+# then compose.hearts.yml needs:
+#
+#     hearts:
+#       networks:
+#         - ghost              # <-- match whatever the caddy service declares
+#
 # Apply and re-test:
 #
 #     docker compose up -d hearts
-#     docker compose exec caddy wget -qO- http://hearts:8091/api/hearts/_health
+#     docker compose exec caddy wget -qO- 'http://hearts:8091/api/hearts/_health'
 #
 # Do not go further until that prints {"ok":true,...}.
 
@@ -90,13 +91,13 @@
 #
 #     docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 #     docker compose exec caddy caddy reload  --config /etc/caddy/Caddyfile
-#     curl -s https://example.com/api/hearts
+#     curl -s 'https://example.com/api/hearts'
 #
 # Expect: {"counts":{},"mine":[],"total":0}
 #
 # And confirm the private endpoint is private:
 #
-#     curl -s -o /dev/null -w '%{http_code}\n' https://example.com/api/hearts/top
+#     curl -s -o /dev/null -w '%{http_code}\n' 'https://example.com/api/hearts/top'
 #
 # Expect: 401
 
@@ -125,9 +126,9 @@
 # less trouble than rebuilding Caddy with a plugin.
 #
 # LOCKING IT DOWN FURTHER: once Caddy reaches the service over the Docker
-# network, the `ports:` line in the compose file is no longer needed at all.
+# network, the `ports:` line in compose.hearts.yml is no longer needed at all.
 # Removing it means nothing is published to the host and the service is
 # unreachable except through Caddy. The trade is that `curl localhost:8091`
 # stops working; use this instead:
 #
-#     docker compose exec caddy wget -qO- http://hearts:8091/api/hearts/_health
+#     docker compose exec caddy wget -qO- 'http://hearts:8091/api/hearts/_health'

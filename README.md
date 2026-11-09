@@ -19,10 +19,11 @@ The report can also be uploaded as a photo gallery to any [Ghost CMS](https://gh
 implementation that permits API access, and optionally features a 
 deployable "Heart" service to view and track visitor's most liked photos.
 
-I hope it's a functional and fun utility to help cull your personal or professional media collection, but always trust your eye. ;-)
+I hope it's a functional and fun utility for your personal or professional
+media collection.
 
-- Brian Salisbury
-  Author, "AI Supervisor"
+Brian Salisbury
+- Creator, AI Supervisor
 
 Released under the **GNU General Public License v3.0 or later** — see
 [License](#14-license).
@@ -1257,6 +1258,49 @@ the Cloudflare dashboard, and `worker/wrangler.toml.example` is a starting
 configuration. On the free plan the traffic this sees — link previews only —
 costs nothing.
 
+### Members-only galleries
+
+`--access` decides who may open the published gallery, using Ghost's own
+membership system: `public`, `members` (anyone signed in), `paid` (paying
+members), or `tiers` with `--tiers "Gold,Silver"`. Ghost enforces it on the
+server. A visitor without access sees your theme's sign-in prompt and never
+receives the gallery. Sign-in, magic-link emails and sign-up are all Ghost's;
+nothing in Photo Scout handles accounts.
+
+A new page is public unless `--access` says otherwise. Republishing *without*
+`--access` leaves an existing page's access exactly as it is, so a gallery you
+restricted in Ghost admin is never opened up by a routine update. `--access
+public` opens it deliberately, and the run says what it changed from.
+
+Three things to know before relying on it:
+
+- **The photographs stay reachable by direct link.** Page access covers the
+  page, not the files: Ghost serves uploaded images to anyone with the address,
+  signed in or not. In practice:
+  - An image address a member copies, or a photograph they save and send on,
+    opens for anyone. Removing that member later doesn't break the links they
+    already have.
+  - Restricting a page that was public doesn't recall anything already shared.
+  - Addresses aren't listed anywhere, but they aren't secret either. File names
+    come from a hash of each photograph's path in your library, and with hearts
+    enabled, the public count endpoint lists the ID of every hearted
+    photograph.
+  - To withdraw a photograph, hide it so the next publish leaves it out, then
+    delete its file from `content/images/` (and purge it from Cloudflare's
+    cache if your site sits behind it).
+
+  Treat a restricted gallery's photographs as unlisted rather than private.
+  Gating the files themselves needs a check in front of Ghost, which Photo
+  Scout doesn't include.
+- **Members-only is only as private as your sign-up.** If anyone may join your
+  site, "members only" means "give us an email address first". For a private
+  gallery, set membership to invite-only in Ghost (Settings → Membership).
+- **Link previews show nothing private.** A preview robot is a signed-out
+  visitor, so with the optional Worker a shared link to a restricted
+  photograph draws a plain card, never the photograph. Do not set Cloudflare to
+  cache the gallery page itself, though: it could store a signed-in member's
+  view and hand it to everyone.
+
 ### Accessibility
 
 Both pages — the local report and the published gallery — are built to meet
@@ -1287,6 +1331,8 @@ inherits whatever spacing your theme gives its content. Three flags adjust the f
 | `--title "Best of 2011"` | Heading above the gallery. **Blank by default**, which also collapses the theme's heading band so the photographs start at the top of the page |
 | `--title-size compact` | What to do with your theme's own heading band. `compact` trims its padding and brings the title down to a sensible size; `keep` leaves the theme untouched; `hide` removes the heading entirely. Defaults to `hide` when `--title` is blank, `compact` otherwise |
 | `--description "…"` | What a link to the gallery says underneath its title in a chat app, a social card or a search result. A sensible generic line by default; `--description ""` leaves whatever you have written in Ghost admin. Folder and photograph links are answered separately — see [Link previews](#link-previews) |
+| `--access members` | Who may open the gallery: `public`, `members` (anyone signed in), `paid` (paying members), or `tiers` with `--tiers`. A new page is public unless this says otherwise; republishing without it leaves an existing page's access exactly as it is. See [Members-only galleries](#members-only-galleries) |
+| `--tiers "Gold,Silver"` | With `--access tiers`: which tiers may open it, by name or slug. Checked against your site before anything is uploaded |
 | `--gap 8` | Space above and below the gallery (default 8). Themes often set a large margin here — Ghost's own default is `max(12vmin, 64px)`, which is a visible hole on a tall screen. This replaces it. Negative values tuck the gallery up closer |
 | `--max-width 1800` | How wide the grid may grow, in pixels |
 | `--column-width 260` | Minimum column width; smaller means more columns |

@@ -98,8 +98,8 @@ RUNNER.write_text(f"""
 import {{ readFileSync }} from 'node:fs';
 import {{ previewTags, withPreview, folderSlugs }}
   from '{(ROOT / "worker" / "preview.js").as_posix()}';
-const html = readFileSync('{PAGE.as_posix()}', 'utf8');
-const [query, base] = process.argv.slice(2);
+const [query, base, page] = process.argv.slice(2);
+const html = readFileSync(page || '{PAGE.as_posix()}', 'utf8');
 if (query === '--slugs') {{
   console.log(JSON.stringify(folderSlugs(JSON.parse(base))));
 }} else {{
@@ -114,9 +114,9 @@ if (query === '--slugs') {{
 SITE = "https://example.com/photographs/"
 
 
-def run(query):
+def run(query, page=None):
     out = subprocess.run([  # nosec B603 - fixed argv, no shell
-        "node", str(RUNNER), query, SITE],
+        "node", str(RUNNER), query, SITE] + ([str(page)] if page else []),
         capture_output=True, text=True, timeout=60)
     if out.returncode != 0:
         print(out.stderr[-600:])
@@ -231,6 +231,30 @@ check("the same goes for a folder name",
       "&quot;" in (tag(r["tags"], "og:title") or "")
       and "&lt;b&gt;" in (tag(r["tags"], "og:title") or ""),
       tag(r["tags"], "og:title"))
+
+print("\n=== a members-only gallery previews as nothing ===")
+# With --access members (or paid, or tiers), Ghost sends a signed-out visitor -
+# which is what a chat app's preview robot is - its sign-in prompt instead of
+# the page. The gallery and its photo list are simply not in what comes back.
+# A shared link to a restricted photograph must then not show that photograph
+# in somebody's chat: the Worker has nothing to read, and leaves the page alone.
+GATED = Path("/tmp/psw_gated.html")
+GATED.write_text(
+    "<!doctype html><html lang='en'><head><meta charset='utf-8'>"
+    "<title>Photographs</title>"
+    "<meta property='og:title' content='Photographs'>"
+    "<meta property='og:image' content='/content/images/theme-cover.jpg'>"
+    "</head><body><article><h1>Photographs</h1>"
+    "<aside class='gh-post-upgrade-cta'><h2>This page is for subscribers only</h2>"
+    "<a href='#/portal/signup'>Subscribe now</a></aside>"
+    "</article></body></html>", encoding="utf-8")
+for query, what in (("?photo=" + ENTRIES[0]["id"], "a photograph link"),
+                    ("?folder=" + slugs[0], "a folder link")):
+    r = run(query, GATED)
+    check(f"{what} to a members-only gallery adds no preview",
+          r["tags"] == "" and not r["changed"], r["tags"][:80])
+    check(f"{what}: and no photograph of yours reaches the card",
+          "/content/images/p" not in r.get("head", "") , r.get("head", "")[-120:])
 
 print("\n=== links that lead nowhere leave the page alone ===")
 for query, why in (("", "an ordinary visit"),

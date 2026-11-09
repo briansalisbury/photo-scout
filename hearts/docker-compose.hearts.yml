@@ -1,9 +1,13 @@
-# Merge this service into the docker-compose.yml that already runs Ghost.
-# Do not run it as a separate compose project: it wants to sit on the same
-# host, reachable only over loopback.
+# The heart service, as an add-on to Ghost's own Docker Compose setup.
 #
-#   docker compose up -d --build hearts
+# Copy this file up beside Ghost's compose.yml, named compose.hearts.yml, and
+# add one line to Ghost's .env so every `docker compose` command loads both:
 #
+#     COMPOSE_FILE=compose.yml:compose.hearts.yml
+#
+# It lives in a file of its own so that Ghost's compose.yml stays exactly as
+# Ghost ships it. Updating Ghost with `git pull` then never conflicts with your
+# changes. DEPLOY_hearts.md has the full steps.
 services:
   hearts:
     build: ./hearts
@@ -26,7 +30,7 @@ services:
     environment:
       HEARTS_DB: /data/hearts.sqlite3
       # Generate once with:  openssl rand -hex 32
-      # Keep it out of this file - put it in the .env beside docker-compose.yml.
+      # Keep it out of this file - put it in the .env beside compose.yml.
       HEARTS_ADMIN_TOKEN: ${HEARTS_ADMIN_TOKEN}
       HEARTS_WRITE_LIMIT: "60"
       HEARTS_THREADS: "4"
@@ -44,3 +48,9 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    # The network Caddy is on, so it can reach this service as hearts:8091.
+    # `ghost_network` is its name in the official Ghost Docker setup; if yours
+    # differs, use whatever the caddy service lists in compose.yml. Running
+    # hearts on its own behind nginx instead? Delete these two lines.
+    networks:
+      - ghost_network

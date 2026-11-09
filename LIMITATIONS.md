@@ -200,6 +200,16 @@ Three ways to clear them, on a self-hosted install:
 **Ghost(Pro) users have no filesystem access**, so the first option is unavailable
 and the third is the practical route.
 
+**Page access protects the page, not the photographs.** `--access`, like the
+page's access setting in Ghost admin, keeps signed-out visitors from opening the
+gallery, but Ghost serves every uploaded image to anyone with its address. A
+member can pass on an image link or a saved copy, and nothing revokes it
+afterward. The addresses are hard to stumble on but not secret: file names come
+from a hash of each photograph's relative path, and the public heart counts
+list the IDs of hearted photographs. Gating the images themselves takes a check
+in front of Ghost, such as a Cloudflare Worker or a proxy auth rule, and isn't
+built in. See [Members-only galleries](README.md#members-only-galleries).
+
 **The published page is a draft by default.** Pass `--status published`, or publish
 it from Ghost admin.
 

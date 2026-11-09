@@ -30,7 +30,18 @@ def check(label, cond, extra=""):
 # ---------------------------------------------------------------------------
 # A mock Ghost
 # ---------------------------------------------------------------------------
-STATE = {"uploads": [], "pages": {}, "auth": [], "seen_filenames": {}, "ua": []}
+STATE = {"uploads": [], "pages": {}, "auth": [], "seen_filenames": {}, "ua": [],
+         # A site's membership tiers as the Admin API lists them: the free tier
+         # every Ghost site has, two paid ones, and one archived that nobody
+         # can join any more.
+         "tiers": [
+             {"id": "t_free", "name": "Free", "slug": "free", "type": "free", "active": True},
+             {"id": "t_gold", "name": "Gold", "slug": "gold", "type": "paid", "active": True},
+             {"id": "t_silver", "name": "Silver Supporters", "slug": "silver",
+              "type": "paid", "active": True},
+             {"id": "t_old", "name": "Founders", "slug": "founders", "type": "paid",
+              "active": False},
+         ]}
 KEY_ID = "6413a2b1c9d0e5f708192a3b"
 KEY_SECRET = "0123456789abcdef" * 4
 ADMIN_KEY = f"{KEY_ID}:{KEY_SECRET}"
@@ -120,6 +131,8 @@ class MockGhost(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._check_auth():
             return
+        if self.path.startswith("/ghost/api/admin/tiers/"):
+            return self._json(200, {"tiers": STATE["tiers"]})
         m = re.match(r"/ghost/api/admin/pages/slug/([^/?]+)", self.path)
         if m:
             slug = m.group(1)
@@ -494,6 +507,131 @@ check("publish succeeds", rc == 0, f"rc={rc}")
 check("and no description field is sent at all",
       not any(k.endswith("_description") or k.endswith("_title") for k in page),
       str([k for k in page if k.endswith(("_description", "_title"))]))
+
+print("\n=== who may open the gallery: --access ===")
+def published(slug, *extra):
+    rc, log = run("--key", ADMIN_KEY, "--slug", slug, *extra)
+    return rc, log, STATE["pages"].get(slug)
+
+rc, log, page = published("open-gallery")
+check("a new page is public when nothing says otherwise",
+      rc == 0 and page.get("visibility") == "public" and "tiers" not in page,
+      str(page and page.get("visibility")))
+check("and the run says so", "Access: public" in log)
+
+# The owner restricts the page by hand in Ghost admin; a routine republish must
+# not quietly open it up again.
+STATE["pages"]["open-gallery"]["visibility"] = "members"
+rc, log, page = published("open-gallery")
+check("republishing without --access leaves the page's access alone",
+      page.get("visibility") == "members", page.get("visibility"))
+check("and says it left it alone",
+      "members only (unchanged; --access changes it)" in log,
+      [l for l in log.splitlines() if "Access" in l])
+rc, log, page = published("open-gallery", "--access", "public")
+check("--access public opens it again, deliberately",
+      page.get("visibility") == "public", page.get("visibility"))
+check("naming what it was before", "(was members only)" in log,
+      [l for l in log.splitlines() if "Access" in l])
+
+rc, log, page = published("members-gallery", "--access", "members")
+check("--access members", rc == 0 and page.get("visibility") == "members",
+      str(page and page.get("visibility")))
+check("with a word about open sign-up, which would make it not very private",
+      "invite-only" in log)
+
+rc, log, page = published("paid-gallery", "--access", "paid")
+check("--access paid", rc == 0 and page.get("visibility") == "paid")
+check("with no warning when the site has a paid tier", "no active paid tier" not in log)
+_saved = STATE["tiers"]
+STATE["tiers"] = [t for t in _saved if t["type"] == "free" or not t["active"]]
+rc, log, page = published("paid-nobody", "--access", "paid")
+check("but a warning when nobody could ever be a paid member",
+      "no active paid tier" in log and page.get("visibility") == "paid")
+STATE["tiers"] = _saved
+
+rc, log, page = published("gold-gallery", "--access", "tiers", "--tiers", "gold")
+check("--access tiers, by slug", rc == 0 and page.get("visibility") == "tiers"
+      and page.get("tiers") == [{"id": "t_gold"}], str(page and page.get("tiers")))
+rc, log, page = published("two-tiers", "--access", "tiers",
+                          "--tiers", "silver supporters, GOLD")
+check("by name, in any case, several at once",
+      page.get("tiers") == [{"id": "t_silver"}, {"id": "t_gold"}],
+      str(page and page.get("tiers")))
+
+# Mistakes are caught before anything is uploaded or written.
+for args_, why, needle in (
+        (["--access", "tiers", "--tiers", "platinum"], "a tier that does not exist",
+         'no active tier called "platinum"'),
+        (["--access", "tiers", "--tiers", "founders"], "an archived tier nobody can join",
+         'no active tier called "founders"'),
+        (["--access", "tiers"], "--access tiers with no --tiers", "needs --tiers"),
+        (["--tiers", "gold"], "--tiers without --access tiers", "only applies with"),
+        (["--access", "members", "--tiers", "gold"], "--tiers with another level",
+         "only applies with")):
+    rc, log, page = published("should-not-exist", *args_)
+    check(f"{why}: refused", rc == 2 and needle in log, log.strip().splitlines()[-1:])
+    check(f"{why}: before any image is touched or any page written",
+          "Images:" not in log and page is None)
+rc, log, _ = published("should-not-exist", "--access", "tiers", "--tiers", "platinum")
+check("and the refusal lists the tiers that do exist",
+      "Free, Gold, Silver Supporters" in log and "Founders" not in log,
+      [l for l in log.splitlines() if "tiers:" in l])
+
+# What is typed is only compared with the site's tiers; the page gets Ghost's
+# own ids, never the text.
+for hostile, why in (('gold"},{"id":"t_free', "a quote-and-brace payload"),
+                     ("gold<script>alert(1)</script>", "markup"),
+                     ("../../pages/x", "a path"),
+                     ("gold\x1b[2J\x1b[1;1H", "a terminal escape sequence")):
+    rc, log, page = published("should-not-exist", "--access", "tiers", "--tiers", hostile)
+    check(f"--tiers with {why}: refused, nothing written", rc == 2 and page is None,
+          log.strip().splitlines()[-2:])
+    check(f"--tiers with {why}: echoed without control characters",
+          "\x1b" not in log)
+check("a page is only ever sent tier ids the site listed",
+      all(t.get("id") in {"t_gold", "t_silver"} and set(t) == {"id"}
+          for p in STATE["pages"].values() for t in (p.get("tiers") or [])),
+      [p.get("tiers") for p in STATE["pages"].values() if p.get("tiers")])
+
+_saved = STATE["tiers"]
+STATE["tiers"] = _saved + [
+    {"id": '"><img src=x>', "name": "Bronze", "slug": "bronze", "type": "paid",
+     "active": True},
+    {"id": {"$ne": ""}, "name": "Copper", "slug": "copper", "type": "paid",
+     "active": True},
+    "not a tier",
+    {"id": "t_evil", "name": "Evil\x1b]0;owned\x07‮Name", "slug": "evil",
+     "type": "paid", "active": True}]
+rc, log, page = published("bronze-gallery", "--access", "tiers", "--tiers", "bronze")
+check("a tier whose id does not look like one is not passed along",
+      rc == 2 and page is None, log.strip().splitlines()[-2:])
+rc, log, page = published("copper-gallery", "--access", "tiers", "--tiers", "copper")
+check("nor one whose id is not a string", rc == 2 and page is None)
+check("tier names from the site are printed without control characters",
+      "\x1b" not in log and "\x07" not in log and "‮" not in log
+      and "Evil]0;ownedName" in log, [l for l in log.splitlines() if "tiers:" in l])
+check("and the list leaves out tiers that could not be used",
+      "Bronze" not in log and "Copper" not in log)
+rc, log, page = published("gold-again", "--access", "tiers", "--tiers", "gold")
+check("and a malformed entry does not stop the real tiers working",
+      rc == 0 and page.get("tiers") == [{"id": "t_gold"}])
+STATE["tiers"] = _saved
+
+check("shown() drops control characters and caps the length",
+      pg.shown("a\x1b[31mb\x00c‮d") == "a[31mbcd"
+      and pg.shown("x" * 500).endswith("...") and len(pg.shown("x" * 500)) == 203)
+
+try:
+    with contextlib.redirect_stderr(io.StringIO()):
+        run("--key", ADMIN_KEY, "--slug", "x", "--access", "everyone")
+    check("an unknown level is refused by the argument parser", False)
+except SystemExit as exc:
+    check("an unknown level is refused by the argument parser", exc.code == 2)
+
+rc, log = run("--dry-run", "--access", "tiers", "--tiers", "gold")
+check("a dry run accepts it without a key, and says the tiers went unchecked",
+      rc == 0 and "not checked in a dry run" in log)
 
 print("\n=== error handling ===")
 rc, log = run("--key", "garbage-no-colon")

@@ -41,7 +41,11 @@ in scope.
 
 **The publish path (`photo_scout_ghost.py`).** Anything that leaks the Ghost
 Admin API key or the heart admin token, sends either over a channel that does
-not protect it, or uploads content the operator did not intend to publish.
+not protect it, uploads content the operator did not intend to publish, or
+leaves a gallery with wider access than `--access` asked for. (That the images
+themselves are reachable by direct link is documented in LIMITATIONS.md, not a
+finding: Ghost serves uploaded media to anyone with the address, whatever the
+page's access.)
 
 **The generated gallery pages.** Both the local report and the published Ghost
 page embed data derived from your file names, folder names and tags. Any input
